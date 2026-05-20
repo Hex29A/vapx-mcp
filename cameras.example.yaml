@@ -1,0 +1,34 @@
+# Example camera configuration for VPX MCP Server
+#
+# Copy this file to cameras.yaml and fill in your camera details.
+# Passwords can reference environment variables with ${ENV_VAR} syntax.
+#
+# Capabilities: snapshot, ptz, events, io, light
+
+cameras:
+  - id: front-door
+    name: "Front Door Camera"
+    host: "192.168.1.100"
+    port: 443
+    https: true
+    verify_ssl: false
+    username: "root"
+    password: "${FRONT_DOOR_PASS}"
+    capabilities:
+      - snapshot
+      - ptz
+      - events
+      - io
+      - light
+
+  - id: backyard
+    name: "Backyard Camera"
+    host: "192.168.1.101"
+    port: 443
+    https: true
+    verify_ssl: false
+    username: "root"
+    password: "${BACKYARD_PASS}"
+    capabilities:
+      - snapshot
+      - events

@@ -1,0 +1,187 @@
+"""
+VAPIX Edge Storage — Disk status, health, and recording management.
+
+Endpoints:
+    GET /axis-cgi/disks/list.cgi       — list disks (SD card, network share)
+    GET /axis-cgi/disks/gethealth.cgi  — disk health (wear, temperature)
+    GET /axis-cgi/record/list.cgi      — list recordings
+    GET /axis-cgi/record/export/properties.cgi — export properties (size, times)
+
+Docs: https://developer.axis.com/vapix/network-video/edge-storage-api/
+
+All these APIs return XML. We parse it into Python dicts for JSON output.
+Only read-only operations are exposed — no formatting, mounting, or deletion.
+"""
+
+import xml.etree.ElementTree as ET
+from typing import Any
+
+from .client import VapixClient
+
+
+def _xml_to_dicts(xml_text: str, element_tag: str) -> list[dict[str, str]]:
+    """Parse XML and extract all elements matching tag as attribute dicts."""
+    root = ET.fromstring(xml_text)
+    results = []
+    for elem in root.iter(element_tag):
+        results.append(dict(elem.attrib))
+    return results
+
+
+async def list_disks(client: VapixClient, disk_id: str = "all") -> list[dict[str, str]]:
+    """
+    List available disks (SD cards, network shares).
+
+    Returns list of dicts with keys:
+        diskid, name, totalsize, freesize, status, filesystem,
+        locked, full, readonly, group, cleanuppolicy, etc.
+
+    Sizes are in kilobytes.
+    """
+    response = await client.get(
+        "/axis-cgi/disks/list.cgi",
+        {"diskid": disk_id},
+    )
+    return _xml_to_dicts(response.text, "disk")
+
+
+async def get_disk_health(client: VapixClient) -> list[dict[str, Any]]:
+    """
+    Get health status of all disks (wear level, temperature, overall).
+
+    Returns list of dicts with keys like:
+        diskid, overallHealth, temperature, wearLevel
+    """
+    response = await client.get("/axis-cgi/disks/gethealth.cgi")
+    text = response.text
+
+    # gethealth.cgi may return JSON on newer firmware or XML on older
+    if text.strip().startswith("{"):
+        import json
+        data = json.loads(text)
+        return data.get("data", {}).get("disks", [data.get("data", {})])
+
+    # XML fallback
+    root = ET.fromstring(text)
+    disks = []
+
+    # Modern format: <HealthStatus diskid="..." wear="..." />
+    for hs in root.iter("HealthStatus"):
+        disks.append(dict(hs.attrib))
+
+    # Older format: <disk diskid="..."><overallHealth>...</overallHealth></disk>
+    if not disks:
+        for disk_elem in root.iter("disk"):
+            disk: dict[str, Any] = dict(disk_elem.attrib)
+            for child in disk_elem:
+                disk[child.tag] = child.text or dict(child.attrib)
+            disks.append(disk)
+
+    return disks if disks else [{"raw": text.strip()}]
+
+
+async def list_recordings(
+    client: VapixClient,
+    *,
+    recording_id: str = "all",
+    disk_id: str | None = None,
+    start_time: str | None = None,
+    stop_time: str | None = None,
+    max_recordings: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    List recordings stored on the device.
+
+    Args:
+        recording_id: Specific recording ID or "all" (default).
+        disk_id: Filter by disk (e.g. "SD_DISK", "NetworkShare").
+        start_time: Filter start time (ISO 8601 UTC, e.g. "2024-01-01T00:00:00Z").
+        stop_time: Filter stop time.
+        max_recordings: Maximum number of recordings to return.
+
+    Returns list of dicts with keys:
+        recordingid, diskid, starttime, stoptime, recordingtype, eventtrigger,
+        source (video/audio attributes as nested dicts)
+    """
+    params: dict[str, Any] = {"recordingid": recording_id}
+    if disk_id:
+        params["diskid"] = disk_id
+    if start_time:
+        params["starttime"] = start_time
+    if stop_time:
+        params["stoptime"] = stop_time
+    if max_recordings:
+        params["maxnumberofrecordings"] = max_recordings
+
+    response = await client.get("/axis-cgi/record/list.cgi", params)
+    text = response.text
+
+    root = ET.fromstring(text)
+    recordings = []
+
+    for rec in root.iter("recording"):
+        entry: dict[str, Any] = dict(rec.attrib)
+        # Extract video/audio sub-elements
+        for child in rec:
+            if child.tag in ("video", "audio"):
+                entry[child.tag] = dict(child.attrib)
+        recordings.append(entry)
+
+    # Include summary from root
+    for recs_elem in root.iter("recordings"):
+        total = recs_elem.attrib.get("totalnumberofrecordings")
+        if total:
+            recordings.insert(0, {
+                "_summary": True,
+                "total": int(total),
+                "returned": int(recs_elem.attrib.get("numberofrecordings", 0)),
+            })
+        break
+
+    return recordings
+
+
+async def get_export_properties(
+    client: VapixClient,
+    recording_id: str,
+    disk_id: str,
+    *,
+    start_time: str | None = None,
+    stop_time: str | None = None,
+) -> dict[str, str]:
+    """
+    Get export properties for a recording (estimated size, proper timestamps).
+
+    Should be called before exporting to check file size.
+
+    Args:
+        recording_id: Recording ID from list_recordings.
+        disk_id: Disk ID where the recording is stored.
+        start_time: Optional clip start time (ISO 8601 UTC).
+        stop_time: Optional clip stop time.
+
+    Returns dict with:
+        RecordingId, ExportFormat, EstimatedFileSize, Starttime, Stoptime
+    """
+    params: dict[str, Any] = {
+        "schemaversion": "1",
+        "recordingid": recording_id,
+        "diskid": disk_id,
+    }
+    if start_time:
+        params["starttime"] = start_time
+    if stop_time:
+        params["stoptime"] = stop_time
+
+    response = await client.get("/axis-cgi/record/export/properties.cgi", params)
+    text = response.text
+
+    root = ET.fromstring(text)
+    for props in root.iter("ExportProperties"):
+        return dict(props.attrib)
+
+    # Check for error
+    for err in root.iter("GeneralError"):
+        raise Exception(f"Export error: {err.attrib}")
+
+    return {"raw": text.strip()}

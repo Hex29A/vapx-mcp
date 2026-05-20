@@ -1,0 +1,11 @@
+# Ignore secrets and local config
+cameras.yaml
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Personal/local files
+spec.md
+testcamera.txt
+.vscode/
