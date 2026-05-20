@@ -4,6 +4,8 @@ A **Model Context Protocol (MCP)** server that wraps **Axis camera VAPIX APIs**,
 
 Built to run in **Docker** for easy deployment.
 
+> This is an independent hobby project and is not affiliated with, endorsed by, or sponsored by Axis Communications AB. VAPIX is a trademark of Axis Communications AB.
+
 ## Features
 
 | Tool | Description | VAPIX Endpoint |
