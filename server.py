@@ -1900,10 +1900,13 @@ async def main():
                     app.create_initialization_options(),
                 )
 
+        async def handle_messages(request):
+            await sse.handle_post_message(request.scope, request.receive, request._send)
+
         starlette_app = Starlette(
             routes=[
                 Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
+                Route("/messages", endpoint=handle_messages, methods=["POST"]),
             ],
         )
         uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
