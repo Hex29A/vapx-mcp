@@ -10,12 +10,11 @@ Tests cover:
 """
 
 import os
-import pytest
-from pathlib import Path
 from unittest.mock import patch
 
-from config import CameraConfig, AppConfig, load_config, _substitute_env_vars
+import pytest
 
+from config import AppConfig, CameraConfig, _substitute_env_vars, load_config
 
 # ---------------------------------------------------------------------------
 # Environment variable substitution

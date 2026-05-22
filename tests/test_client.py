@@ -11,13 +11,12 @@ Tests cover:
 Uses respx to mock httpx requests — no real cameras needed.
 """
 
-import pytest
 import httpx
+import pytest
 import respx
 
 from config import CameraConfig
 from vapix.client import VapixClient, VapixError
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

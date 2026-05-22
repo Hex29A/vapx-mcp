@@ -7,13 +7,14 @@ Uses respx to mock HTTP responses — no real cameras needed.
 
 import json
 import os
-import pytest
+
 import httpx
+import pytest
 import respx
 
 from config import CameraConfig
-from vapix.client import VapixClient, VapixError
-from vapix import time_service, daynight, stream_profiles, geolocation, audio, storage
+from vapix import audio, daynight, geolocation, storage, stream_profiles, time_service
+from vapix.client import VapixClient
 
 
 def _make_camera(**overrides):

@@ -10,14 +10,13 @@ Each test validates:
     - Response data is correctly parsed and returned
 """
 
-import pytest
 import httpx
+import pytest
 import respx
 
 from config import CameraConfig
+from vapix import device, imaging, io_ports, light, ptz
 from vapix.client import VapixClient, VapixError
-from vapix import device, imaging, ptz, io_ports, light
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

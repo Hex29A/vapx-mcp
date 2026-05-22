@@ -6,13 +6,14 @@ Uses respx to mock HTTP responses.
 """
 
 import json
-import pytest
+
 import httpx
+import pytest
 import respx
 
 from config import CameraConfig
+from vapix import analytics_metadata, capture_mode, ntp, orientation
 from vapix.client import VapixClient
-from vapix import capture_mode, orientation, ntp, analytics_metadata
 
 
 def _make_camera(**overrides):
@@ -303,7 +304,7 @@ class TestServerPhase3:
     @pytest.mark.asyncio
     async def test_handler_registry_complete(self):
         """Every camera tool should have a handler in the registry."""
-        from server import TOOLS, _CAMERA_HANDLERS, _GLOBAL_HANDLERS
+        from server import _CAMERA_HANDLERS, _GLOBAL_HANDLERS, TOOLS
         all_handlers = set(_CAMERA_HANDLERS.keys()) | set(_GLOBAL_HANDLERS.keys())
         for tool in TOOLS:
             assert tool.name in all_handlers, f"Tool '{tool.name}' has no handler"

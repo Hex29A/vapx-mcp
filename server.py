@@ -48,10 +48,32 @@ from mcp.types import (
 )
 
 from config import AppConfig, CameraConfig, load_config
+from vapix import (
+    analytics_metadata,
+    audio,
+    capture_mode,
+    clear_view,
+    daynight,
+    device,
+    discovery,
+    events,
+    geolocation,
+    guard_tour,
+    imaging,
+    io_ports,
+    light,
+    ntp,
+    orientation,
+    overlay,
+    privacy_mask,
+    ptz,
+    siren,
+    storage,
+    stream_profiles,
+    time_service,
+    vmd,
+)
 from vapix.client import VapixClient, VapixError
-from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
-from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
-from vapix import capture_mode, orientation, ntp, analytics_metadata
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -1861,10 +1883,10 @@ async def main():
                 app.create_initialization_options(),
             )
     elif args.transport == "sse":
+        import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
         from starlette.routing import Route
-        import uvicorn
 
         sse = SseServerTransport("/messages")
 
@@ -1887,10 +1909,10 @@ async def main():
         uvicorn.run(starlette_app, host="0.0.0.0", port=args.port)
 
     elif args.transport == "streamable-http":
+        import uvicorn
         from mcp.server.streamable_http import StreamableHTTPServerTransport
         from starlette.applications import Starlette
         from starlette.routing import Mount
-        import uvicorn
 
         transport = StreamableHTTPServerTransport(
             mcp_endpoint="/mcp",

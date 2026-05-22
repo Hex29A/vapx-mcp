@@ -2,14 +2,37 @@
 Smoke test against a real camera — read-only operations only.
 """
 import asyncio
+import socket
 import sys
 import traceback
-import socket
+
 from config import load_config
-from vapix.client import VapixClient, VapixError
-from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
-from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
-from vapix import capture_mode, orientation, ntp, analytics_metadata
+from vapix import (
+    analytics_metadata,
+    audio,
+    capture_mode,
+    clear_view,
+    daynight,
+    device,
+    discovery,
+    events,
+    geolocation,
+    guard_tour,
+    imaging,
+    io_ports,
+    light,
+    ntp,
+    orientation,
+    overlay,
+    privacy_mask,
+    ptz,
+    siren,
+    storage,
+    stream_profiles,
+    time_service,
+    vmd,
+)
+from vapix.client import VapixClient
 
 
 async def main():
@@ -179,7 +202,7 @@ async def main():
             if status:
                 print(f"  Active: {status}")
             else:
-                print(f"  Status: idle")
+                print("  Status: idle")
             ok += 1
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")

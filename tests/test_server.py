@@ -13,16 +13,15 @@ to avoid needing a real MCP transport.
 """
 
 import json
-import pytest
-import httpx
-import respx
 
-from config import CameraConfig, AppConfig
-from mcp.types import TextContent, ImageContent
+import httpx
+import pytest
+import respx
+from mcp.types import ImageContent, TextContent
 
 # We need to set up config before importing server internals
 import server as srv
-
+from config import AppConfig, CameraConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
