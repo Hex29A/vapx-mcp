@@ -3,7 +3,13 @@
 # Copy this file to cameras.yaml and fill in your camera details.
 # Passwords can reference environment variables with ${ENV_VAR} syntax.
 #
-# Capabilities: snapshot, ptz, events, io, light
+# Available capabilities:
+#   snapshot, ptz, io, light, overlay, vmd, guard_tour, siren,
+#   storage, clear_view, privacy_mask, time, daynight,
+#   stream_profiles, geolocation, audio, events,
+#   capture_mode, orientation, ntp, analytics_metadata
+#
+# Use "auto" to auto-detect capabilities via the API Discovery endpoint.
 
 cameras:
   - id: front-door
@@ -20,6 +26,7 @@ cameras:
       - events
       - io
       - light
+      - storage
 
   - id: backyard
     name: "Backyard Camera"
@@ -30,5 +37,4 @@ cameras:
     username: "root"
     password: "${BACKYARD_PASS}"
     capabilities:
-      - snapshot
-      - events
+      - auto  # Auto-detect capabilities from camera

@@ -58,6 +58,25 @@ Built to run in **Docker** for easy deployment.
 | `get_audio_settings` | Get audio device settings (gain, mute, input) | `/axis-cgi/audiodevicecontrol.cgi` |
 | `set_audio_settings` | Update audio device settings | `/axis-cgi/audiodevicecontrol.cgi` |
 | `poll_events` | Collect camera events via WebSocket (1-30s poll) | `ws://device/vapix/ws-data-stream` |
+| `get_capture_modes` | List available capture modes (resolution/FPS) | `/axis-cgi/capturemode.cgi` |
+| `set_capture_mode` | Set capture mode (requires reboot) | `/axis-cgi/capturemode.cgi` |
+| `get_orientation` | Read physical orientation sensor values | `/axis-cgi/orientation/*.cgi` |
+| `get_ntp_status` | Get NTP synchronization status | `/axis-cgi/ntp.cgi` |
+| `set_ntp_config` | Configure NTP client settings | `/axis-cgi/ntp.cgi` |
+| `list_analytics_producers` | List analytics metadata producers | `/axis-cgi/analyticsmetadataconfig.cgi` |
+| `set_analytics_producers` | Enable/disable analytics producers | `/axis-cgi/analyticsmetadataconfig.cgi` |
+| `snapshot_all` | Capture snapshots from all cameras at once | Multi-camera batch |
+| `status_all` | Get online/offline status of all cameras | Multi-camera batch |
+
+**55 tools** across 22 VAPIX API families.
+
+## Additional Features
+
+- **Auto-capability detection**: Add `auto` to a camera's capabilities list to auto-discover supported APIs via VAPIX API Discovery. Detected capabilities are merged with manually specified ones.
+- **MCP Resources**: Cameras expose `camera://{id}/snapshot` (live JPEG) and `camera://{id}/info` (device properties) as MCP resources.
+- **Streamable HTTP transport**: Run with `--transport streamable-http` for the latest MCP transport protocol.
+- **Typed dispatch**: Handler-function registry with per-tool capability checking — easy to extend.
+- **GitHub Actions CI**: Automated linting (ruff), Docker test builds, and unit tests on every push/PR.
 
 ## Quick Start (Docker)
 
@@ -109,17 +128,21 @@ Add to your MCP client config (e.g. `~/.claude.json`):
 
 ### 5. Alternative: SSE/HTTP mode
 
-For web-based access or debugging, run in SSE mode:
+For web-based access or debugging:
 
 ```bash
+# SSE mode
 docker compose up vpx-sse
 # Server available at http://localhost:8080/sse
+
+# Streamable HTTP mode (latest MCP transport)
+python server.py --transport streamable-http --port 8080
 ```
 
 ## Project Structure
 
 ```
-├── server.py              # MCP server entry point & tool definitions
+├── server.py              # MCP server entry point, tool definitions & dispatch
 ├── config.py              # YAML config loading with env var substitution
 ├── vapix/
 │   ├── client.py          # Base HTTP client (auth, requests, errors)
@@ -127,16 +150,31 @@ docker compose up vpx-sse
 │   ├── imaging.py         # JPEG snapshot capture
 │   ├── ptz.py             # Pan/Tilt/Zoom control
 │   ├── io_ports.py        # I/O port management
-│   └── light.py           # Light control (IR/white LEDs)
-├── tests/
-│   ├── test_config.py     # Config loading & validation tests
-│   ├── test_client.py     # HTTP client & auth tests
-│   ├── test_vapix_apis.py # VAPIX API module tests
-│   └── test_server.py     # MCP server integration tests
+│   ├── light.py           # Light control (IR/white LEDs)
+│   ├── discovery.py       # API Discovery
+│   ├── overlay.py         # Dynamic text/image overlays
+│   ├── vmd.py             # VMD4 motion detection
+│   ├── guard_tour.py      # PTZ guard tours
+│   ├── siren.py           # Siren & strobe light control
+│   ├── storage.py         # Edge storage & recording export
+│   ├── clear_view.py      # Wiper / speed-dry control
+│   ├── privacy_mask.py    # Privacy mask management
+│   ├── time_service.py    # Date/time & timezone
+│   ├── daynight.py        # IR-cut filter day/night switching
+│   ├── stream_profiles.py # Video stream profiles
+│   ├── geolocation.py     # GPS coordinates
+│   ├── audio.py           # Audio device control
+│   ├── events.py          # WebSocket event streaming
+│   ├── capture_mode.py    # Capture mode (resolution/FPS)
+│   ├── orientation.py     # Physical orientation sensor
+│   ├── ntp.py             # NTP synchronization
+│   └── analytics_metadata.py # Analytics metadata producers
+├── tests/                 # Unit & integration tests (mocked HTTP)
+├── .github/workflows/ci.yml  # GitHub Actions CI
 ├── Dockerfile
 ├── docker-compose.yml
 ├── cameras.example.yaml   # Example camera config
-├── .env.example            # Example environment variables
+├── .env.example           # Example environment variables
 ├── requirements.txt
 └── spec.md                # Original implementation spec
 ```
@@ -165,16 +203,34 @@ cameras:
 
 ### Capabilities
 
-Only declare capabilities your camera actually has:
+Only declare capabilities your camera actually has. Use `auto` for auto-detection via API Discovery.
 
 | Capability | Required for |
 |------------|-------------|
-| `snapshot` | `get_snapshot` |
+| `auto` | Auto-detect via VAPIX API Discovery (merged with manual) |
+| `snapshot` | `get_snapshot`, `snapshot_all` |
 | `ptz` | `ptz_move`, `ptz_relative`, `ptz_home`, `ptz_preset`, `ptz_status` |
 | `io` | `get_io_ports`, `set_io_port` |
 | `light` | `get_lights`, `toggle_light` |
+| `overlay` | `list_overlays`, `add_overlay`, `remove_overlay` |
+| `vmd` | `get_motion_config`, `set_motion_config` |
+| `guard_tour` | `list_guard_tours`, `start_guard_tour`, `stop_guard_tour` |
+| `siren` | `get_siren_status`, `activate_siren`, `stop_siren` |
+| `storage` | `get_disk_status`, `list_recordings`, `get_recording_info`, `export_recording` |
+| `clear_view` | `get_clear_view_info`, `start_clear_view`, `stop_clear_view` |
+| `privacy_mask` | `list_privacy_masks`, `add_privacy_mask`, `remove_privacy_mask` |
+| `time` | `get_time_info`, `set_timezone` |
+| `daynight` | `get_daynight_config`, `set_daynight_config` |
+| `stream_profiles` | `list_stream_profiles`, `create_stream_profile`, `remove_stream_profile` |
+| `geolocation` | `get_geolocation`, `set_geolocation` |
+| `audio` | `get_audio_settings`, `set_audio_settings` |
+| `events` | `poll_events` |
+| `capture_mode` | `get_capture_modes`, `set_capture_mode` |
+| `orientation` | `get_orientation` |
+| `ntp` | `get_ntp_status`, `set_ntp_config` |
+| `analytics_metadata` | `list_analytics_producers`, `set_analytics_producers` |
 
-`get_camera_info` and `list_cameras` work regardless of capabilities.
+`get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, and `status_all` work regardless of capabilities.
 
 ## Authentication
 
@@ -198,6 +254,9 @@ python server.py --config cameras.yaml
 
 # Run in SSE mode
 python server.py --transport sse --port 8080
+
+# Run in Streamable HTTP mode
+python server.py --transport streamable-http --port 8080
 ```
 
 ## Running Tests

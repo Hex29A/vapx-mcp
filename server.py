@@ -39,7 +39,10 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.types import (
+    AnyUrl,
+    BlobResourceContents,
     ImageContent,
+    Resource,
     TextContent,
     Tool,
 )
@@ -48,6 +51,7 @@ from config import AppConfig, CameraConfig, load_config
 from vapix.client import VapixClient, VapixError
 from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
 from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
+from vapix import capture_mode, orientation, ntp, analytics_metadata
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -67,6 +71,29 @@ config: AppConfig | None = None
 # Cache VapixClient instances per camera_id
 _clients: dict[str, VapixClient] = {}
 
+# Map VAPIX API discovery IDs to our capability names
+_API_TO_CAPABILITY: dict[str, str] = {
+    "io-port-management": "io",
+    "light-control": "light",
+    "ptz-control": "ptz",
+    "dynamicoverlay": "overlay",
+    "guard-tour": "guard_tour",
+    "siren-and-light": "siren",
+    "disk-management": "storage",
+    "recording": "storage",
+    "recording-export": "storage",
+    "clear-view": "clear_view",
+    "privacy-mask": "privacy_mask",
+    "time-service": "time",
+    "stream-profiles": "stream_profiles",
+    "audio-device-control": "audio",
+    "event-streaming-over-websocket": "events",
+    "capture-mode": "capture_mode",
+    "orientation": "orientation",
+    "ntp": "ntp",
+    "analytics-metadata-config": "analytics_metadata",
+}
+
 
 def _get_config() -> AppConfig:
     """Get the loaded config, raising if not initialized."""
@@ -81,6 +108,40 @@ def _get_client(camera: CameraConfig) -> VapixClient:
     if camera.id not in _clients:
         _clients[camera.id] = VapixClient(camera)
     return _clients[camera.id]
+
+
+async def _auto_detect_capabilities(camera: CameraConfig) -> None:
+    """
+    Auto-detect capabilities via API Discovery and merge into camera config.
+
+    Called when capabilities contains "auto". Discovered capabilities are
+    merged with any explicitly listed ones (manual entries take precedence).
+    """
+    client = _get_client(camera)
+    try:
+        apis = await discovery.get_api_list(client)
+        discovered = {"snapshot"}  # snapshot is always available
+        for api_info in apis:
+            api_id = api_info.get("id", "")
+            cap = _API_TO_CAPABILITY.get(api_id)
+            if cap:
+                discovered.add(cap)
+        # Merge: keep manual capabilities, add discovered ones
+        manual = {c for c in camera.capabilities if c != "auto"}
+        camera.capabilities = sorted(manual | discovered)
+        logger.info(
+            "Auto-detected capabilities for %s: %s",
+            camera.id,
+            camera.capabilities,
+        )
+    except Exception as e:
+        logger.warning(
+            "Auto-detection failed for %s: %s — using manual capabilities",
+            camera.id, e,
+        )
+        camera.capabilities = [c for c in camera.capabilities if c != "auto"]
+        if not camera.capabilities:
+            camera.capabilities = ["snapshot"]
 
 
 def _resolve_camera(camera_id: str) -> tuple[CameraConfig, VapixClient]:
@@ -1065,6 +1126,168 @@ TOOLS = [
             "required": ["camera_id"],
         },
     ),
+    # --- Capture Mode ---
+    Tool(
+        name="get_capture_modes",
+        description=(
+            "List available video capture modes (resolution + max FPS) "
+            "for a camera. Shows which mode is currently active."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_capture_mode",
+        description=(
+            "Switch a camera to a different capture mode (resolution/FPS). "
+            "WARNING: Requires camera reboot to take effect."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "channel": {
+                    "type": "integer",
+                    "description": "Video channel (default 0)",
+                    "default": 0,
+                },
+                "capture_mode_id": {
+                    "type": "integer",
+                    "description": "Capture mode ID from get_capture_modes",
+                },
+            },
+            "required": ["camera_id", "capture_mode_id"],
+        },
+    ),
+    # --- Orientation Sensor ---
+    Tool(
+        name="get_orientation",
+        description=(
+            "Read the camera's physical orientation from its built-in sensor "
+            "(accelerometer/gyroscope). Returns longitudinal rotation and "
+            "lateral tilt angles. Not all cameras have this hardware."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- NTP ---
+    Tool(
+        name="get_ntp_status",
+        description=(
+            "Get NTP time synchronization status — whether NTP is enabled, "
+            "sync status, configured servers, time offset, and next sync time."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_ntp_config",
+        description=(
+            "Configure NTP time synchronization — enable/disable, set server "
+            "source (static or DHCP), and configure NTP server addresses."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable or disable NTP client",
+                },
+                "servers_source": {
+                    "type": "string",
+                    "enum": ["static", "DHCP"],
+                    "description": "Source of NTP servers",
+                },
+                "static_servers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of NTP server addresses (overwrites existing)",
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- Analytics Metadata ---
+    Tool(
+        name="list_analytics_producers",
+        description=(
+            "List analytics metadata producers (object detection, motion, etc.) "
+            "and whether they are enabled per video channel."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_analytics_producers",
+        description=(
+            "Enable or disable specific analytics metadata producers per "
+            "video channel. Pass the producers array with name and channel settings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "producers": {
+                    "type": "array",
+                    "description": (
+                        "List of producers to configure. Each: "
+                        '{name: "producer_name", videochannels: [{channel: 0, enabled: true}]}'
+                    ),
+                },
+            },
+            "required": ["camera_id", "producers"],
+        },
+    ),
+    # --- Multi-camera batch tools ---
+    Tool(
+        name="snapshot_all",
+        description=(
+            "Capture a JPEG snapshot from every configured camera simultaneously. "
+            "Returns images from all reachable cameras. Useful for a quick overview."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "resolution": {
+                    "type": "string",
+                    "description": 'Image resolution (e.g. "1280x720"). Default: "640x480" for batch.',
+                    "default": "640x480",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="status_all",
+        description=(
+            "Get a quick status summary of all configured cameras — "
+            "model, firmware, online/offline, and key capabilities."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 
@@ -1075,6 +1298,71 @@ TOOLS = [
 async def handle_list_tools() -> list[Tool]:
     """Return the list of available VAPIX tools."""
     return TOOLS
+
+
+# ---------------------------------------------------------------------------
+# MCP Resource handlers — live camera snapshots
+# ---------------------------------------------------------------------------
+@app.list_resources()
+async def handle_list_resources() -> list[Resource]:
+    """Expose each camera's live snapshot as a readable resource."""
+    cfg = _get_config()
+    resources = []
+    for cam in cfg.cameras:
+        if "snapshot" in cam.capabilities:
+            resources.append(
+                Resource(
+                    uri=AnyUrl(f"camera://{cam.id}/snapshot"),
+                    name=f"{cam.name} — Live Snapshot",
+                    description=f"Current JPEG snapshot from {cam.name} ({cam.host})",
+                    mimeType="image/jpeg",
+                )
+            )
+        resources.append(
+            Resource(
+                uri=AnyUrl(f"camera://{cam.id}/info"),
+                name=f"{cam.name} — Device Info",
+                description=f"Device information for {cam.name}",
+                mimeType="application/json",
+            )
+        )
+    return resources
+
+
+@app.read_resource()
+async def handle_read_resource(uri: AnyUrl) -> list[BlobResourceContents]:
+    """Read a camera resource by URI."""
+    uri_str = str(uri)
+    if not uri_str.startswith("camera://"):
+        raise ValueError(f"Unknown resource URI scheme: {uri_str}")
+
+    # Parse camera://camera_id/resource_type
+    parts = uri_str.replace("camera://", "").split("/", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid resource URI: {uri_str}")
+
+    camera_id, resource_type = parts
+    camera, client = _resolve_camera(camera_id)
+
+    if resource_type == "snapshot":
+        _check_capability(camera, "snapshot")
+        jpeg_bytes = await imaging.get_snapshot(client, resolution="1920x1080")
+        b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+        return [BlobResourceContents(
+            uri=uri,
+            mimeType="image/jpeg",
+            blob=b64,
+        )]
+    elif resource_type == "info":
+        props = await device.get_all_properties(client)
+        from mcp.types import TextResourceContents
+        return [TextResourceContents(
+            uri=uri,
+            mimeType="application/json",
+            text=json.dumps(props, ensure_ascii=False, indent=2),
+        )]
+    else:
+        raise ValueError(f"Unknown resource type: {resource_type}")
 
 
 @app.call_tool()
@@ -1103,19 +1391,9 @@ async def _dispatch_tool(
 ) -> list[TextContent | ImageContent]:
     """Dispatch a tool call to its handler. Separated for testability."""
 
-    # --- list_cameras (no camera_id needed) ---
-    if name == "list_cameras":
-        cfg = _get_config()
-        cameras_info = [
-            {
-                "id": cam.id,
-                "name": cam.name,
-                "host": cam.host,
-                "capabilities": cam.capabilities,
-            }
-            for cam in cfg.cameras
-        ]
-        return _text_result(cameras_info)
+    # --- Global tools (no camera_id needed) ---
+    if name in _GLOBAL_HANDLERS:
+        return await _GLOBAL_HANDLERS[name](args)
 
     # --- All other tools require camera_id ---
     camera_id = args.get("camera_id")
@@ -1124,364 +1402,413 @@ async def _dispatch_tool(
 
     camera, client = _resolve_camera(camera_id)
 
-    # --- get_camera_info ---
-    if name == "get_camera_info":
-        props = await device.get_all_properties(client)
-        return _text_result(props)
+    if name not in _CAMERA_HANDLERS:
+        raise ValueError(f"Unknown tool: {name}")
 
-    # --- get_snapshot ---
-    if name == "get_snapshot":
-        _check_capability(camera, "snapshot")
-        resolution = args.get("resolution", "1920x1080")
-        jpeg_bytes = await imaging.get_snapshot(client, resolution=resolution)
-        b64 = base64.b64encode(jpeg_bytes).decode("ascii")
-        return [ImageContent(type="image", data=b64, mimeType="image/jpeg")]
+    capability, handler = _CAMERA_HANDLERS[name]
+    if capability:
+        _check_capability(camera, capability)
 
-    # --- PTZ tools ---
-    if name == "ptz_move":
-        _check_capability(camera, "ptz")
-        result = await ptz.move_absolute(
-            client,
-            pan=args["pan"],
-            tilt=args["tilt"],
-            zoom=args["zoom"],
-        )
-        return _text_result(f"Moved {camera.name} to pan={args['pan']}, tilt={args['tilt']}, zoom={args['zoom']}")
+    return await handler(camera, client, args)
 
-    if name == "ptz_relative":
-        _check_capability(camera, "ptz")
-        result = await ptz.move_relative(
-            client,
-            rpan=args.get("rpan", 0),
-            rtilt=args.get("rtilt", 0),
-            rzoom=args.get("rzoom", 0),
-        )
-        return _text_result(f"Moved {camera.name} by relative offset")
 
-    if name == "ptz_home":
-        _check_capability(camera, "ptz")
-        await ptz.go_home(client)
-        return _text_result(f"Sent {camera.name} to home position")
+# ---------------------------------------------------------------------------
+# Global tool handlers (no camera_id)
+# ---------------------------------------------------------------------------
+async def _h_list_cameras(args: dict) -> list[TextContent]:
+    cfg = _get_config()
+    return _text_result([
+        {"id": c.id, "name": c.name, "host": c.host, "capabilities": c.capabilities}
+        for c in cfg.cameras
+    ])
 
-    if name == "ptz_preset":
-        _check_capability(camera, "ptz")
-        preset = args["preset_name"]
-        await ptz.go_to_preset(client, preset)
-        return _text_result(f"Sent {camera.name} to preset '{preset}'")
 
-    if name == "ptz_status":
-        _check_capability(camera, "ptz")
-        position = await ptz.get_position(client)
-        return _text_result(position)
+async def _h_snapshot_all(args: dict) -> list[TextContent | ImageContent]:
+    cfg = _get_config()
+    resolution = args.get("resolution", "640x480")
+    results: list[TextContent | ImageContent] = []
+    for cam in cfg.cameras:
+        if "snapshot" not in cam.capabilities:
+            continue
+        try:
+            c = _get_client(cam)
+            jpeg_bytes = await imaging.get_snapshot(c, resolution=resolution)
+            b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+            results.append(TextContent(type="text", text=f"--- {cam.name} ({cam.id}) ---"))
+            results.append(ImageContent(type="image", data=b64, mimeType="image/jpeg"))
+        except Exception as e:
+            results.append(TextContent(type="text", text=f"--- {cam.name} ({cam.id}): Error: {e} ---"))
+    return results or _text_result("No cameras with snapshot capability configured")
 
-    # --- I/O port tools ---
-    if name == "get_io_ports":
-        _check_capability(camera, "io")
-        ports = await io_ports.get_ports(client)
-        return _text_result(ports)
 
-    if name == "set_io_port":
-        _check_capability(camera, "io")
-        result = await io_ports.set_port_state(
-            client, port=args["port"], state=args["state"]
-        )
-        return _text_result(
-            f"Set port {args['port']} on {camera.name} to '{args['state']}'"
-        )
+async def _h_status_all(args: dict) -> list[TextContent]:
+    cfg = _get_config()
+    statuses = []
+    for cam in cfg.cameras:
+        status: dict[str, Any] = {
+            "id": cam.id, "name": cam.name, "host": cam.host,
+            "capabilities": cam.capabilities,
+        }
+        try:
+            c = _get_client(cam)
+            props = await device.get_all_properties(c)
+            status.update(online=True, model=props.get("ProdNbr", "unknown"),
+                          firmware=props.get("Version", "unknown"),
+                          serial=props.get("SerialNumber", "unknown"))
+        except Exception as e:
+            status.update(online=False, error=str(e))
+        statuses.append(status)
+    return _text_result(statuses)
 
-    # --- Light tools ---
-    if name == "get_lights":
-        _check_capability(camera, "light")
-        lights = await light.get_light_information(client)
-        return _text_result(lights)
 
-    if name == "toggle_light":
-        _check_capability(camera, "light")
-        light_id = args["light_id"]
-        on = args["on"]
-        if on:
-            await light.activate_light(client, light_id)
-            return _text_result(f"Activated light '{light_id}' on {camera.name}")
-        else:
-            await light.deactivate_light(client, light_id)
-            return _text_result(f"Deactivated light '{light_id}' on {camera.name}")
+_GLOBAL_HANDLERS: dict[str, Any] = {
+    "list_cameras": _h_list_cameras,
+    "snapshot_all": _h_snapshot_all,
+    "status_all": _h_status_all,
+}
 
-    # --- API Discovery ---
-    if name == "discover_apis":
-        apis = await discovery.get_api_list(client)
-        return _text_result(apis)
 
-    # --- Overlay tools ---
-    if name == "list_overlays":
-        _check_capability(camera, "overlay")
-        result = await overlay.list_overlays(client)
-        return _text_result(result)
+# ---------------------------------------------------------------------------
+# Camera tool handlers (camera_id required)
+# Each handler signature: async (camera, client, args) -> list[Content]
+# ---------------------------------------------------------------------------
+async def _h_get_camera_info(cam, client, args):
+    return _text_result(await device.get_all_properties(client))
 
-    if name == "add_overlay":
-        _check_capability(camera, "overlay")
-        identity = await overlay.add_text(
-            client,
-            text=args["text"],
-            position=args.get("position", "topLeft"),
-            text_color=args.get("text_color", "white"),
-            text_bg_color=args.get("text_bg_color", "transparent"),
-        )
-        return _text_result(f"Added text overlay on {camera.name} (identity={identity})")
 
-    if name == "remove_overlay":
-        _check_capability(camera, "overlay")
-        await overlay.remove_overlay(client, identity=args["identity"])
-        return _text_result(f"Removed overlay {args['identity']} from {camera.name}")
+async def _h_get_snapshot(cam, client, args):
+    resolution = args.get("resolution", "1920x1080")
+    jpeg_bytes = await imaging.get_snapshot(client, resolution=resolution)
+    b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+    return [ImageContent(type="image", data=b64, mimeType="image/jpeg")]
 
-    # --- Motion Detection tools ---
-    if name == "get_motion_config":
-        _check_capability(camera, "vmd")
-        config_data = await vmd.get_configuration(client)
-        return _text_result(config_data)
 
-    if name == "set_motion_config":
-        _check_capability(camera, "vmd")
-        await vmd.set_configuration(
-            client,
-            cameras=args["cameras"],
-            profiles=args["profiles"],
-        )
-        return _text_result(f"Updated motion detection configuration on {camera.name}")
+async def _h_ptz_move(cam, client, args):
+    await ptz.move_absolute(client, pan=args["pan"], tilt=args["tilt"], zoom=args["zoom"])
+    return _text_result(f"Moved {cam.name} to pan={args['pan']}, tilt={args['tilt']}, zoom={args['zoom']}")
 
-    # --- Guard Tour tools ---
-    if name == "list_guard_tours":
-        _check_capability(camera, "guard_tour")
-        tours = await guard_tour.list_tours(client)
-        return _text_result(tours)
 
-    if name == "start_guard_tour":
-        _check_capability(camera, "guard_tour")
-        await guard_tour.start_tour(client, tour_id=args["tour_id"])
-        return _text_result(f"Started guard tour {args['tour_id']} on {camera.name}")
+async def _h_ptz_relative(cam, client, args):
+    await ptz.move_relative(client, rpan=args.get("rpan", 0), rtilt=args.get("rtilt", 0), rzoom=args.get("rzoom", 0))
+    return _text_result(f"Moved {cam.name} by relative offset")
 
-    if name == "stop_guard_tour":
-        _check_capability(camera, "guard_tour")
-        await guard_tour.stop_tour(client, tour_id=args["tour_id"])
-        return _text_result(f"Stopped guard tour {args['tour_id']} on {camera.name}")
 
-    # --- Siren & Light tools ---
-    if name == "get_siren_status":
-        _check_capability(camera, "siren")
-        status = await siren.get_status(client)
-        return _text_result(status)
+async def _h_ptz_home(cam, client, args):
+    await ptz.go_home(client)
+    return _text_result(f"Sent {cam.name} to home position")
 
-    if name == "activate_siren":
-        _check_capability(camera, "siren")
-        profile_name = args.get("profile")
-        if profile_name:
-            result = await siren.start(client, profile=profile_name)
-        else:
-            siren_config = None
-            light_config = None
-            if args.get("siren_pattern"):
-                siren_config = {"pattern": args["siren_pattern"]}
-                if args.get("siren_intensity"):
-                    siren_config["intensity"] = args["siren_intensity"]
-            if args.get("light_pattern"):
-                light_config = {
-                    "pattern": args["light_pattern"],
-                    "speed": 1,
-                }
-                if args.get("light_colors"):
-                    light_config["colors"] = args["light_colors"]
-                if args.get("light_intensity"):
-                    light_config["intensity"] = args["light_intensity"]
-            result = await siren.start(
-                client,
-                siren=siren_config,
-                light=light_config,
-                duration=args.get("duration"),
-            )
-        return _text_result(f"Activated siren/light on {camera.name}: {result}")
 
-    if name == "stop_siren":
-        _check_capability(camera, "siren")
-        await siren.stop(client)
-        return _text_result(f"Stopped siren and light on {camera.name}")
+async def _h_ptz_preset(cam, client, args):
+    preset = args["preset_name"]
+    await ptz.go_to_preset(client, preset)
+    return _text_result(f"Sent {cam.name} to preset '{preset}'")
 
-    # --- Edge Storage tools ---
-    if name == "get_disk_status":
-        _check_capability(camera, "storage")
-        disks = await storage.list_disks(client)
-        return _text_result(disks)
 
-    if name == "list_recordings":
-        _check_capability(camera, "storage")
-        recordings = await storage.list_recordings(
-            client,
-            disk_id=args.get("disk_id"),
-            start_time=args.get("start_time"),
-            stop_time=args.get("stop_time"),
-            max_recordings=args.get("max_recordings"),
-        )
-        return _text_result(recordings)
+async def _h_ptz_status(cam, client, args):
+    return _text_result(await ptz.get_position(client))
 
-    if name == "get_recording_info":
-        _check_capability(camera, "storage")
-        props = await storage.get_export_properties(
-            client,
-            recording_id=args["recording_id"],
-            disk_id=args["disk_id"],
-            start_time=args.get("start_time"),
-            stop_time=args.get("stop_time"),
-        )
-        return _text_result(props)
 
-    # --- Clear View tools ---
-    if name == "get_clear_view_info":
-        _check_capability(camera, "clear_view")
-        services = await clear_view.get_service_info(client)
-        return _text_result(services)
+async def _h_get_io_ports(cam, client, args):
+    return _text_result(await io_ports.get_ports(client))
 
-    if name == "start_clear_view":
-        _check_capability(camera, "clear_view")
-        service_id = args.get("service_id", 0)
-        duration = args.get("duration")
-        await clear_view.start(client, service_id=service_id, duration=duration)
-        return _text_result(
-            f"Started Clear View service {service_id} on {camera.name}"
-            + (f" (duration={duration}s)" if duration else "")
-        )
 
-    if name == "stop_clear_view":
-        _check_capability(camera, "clear_view")
-        service_id = args.get("service_id", 0)
-        await clear_view.stop(client, service_id=service_id)
-        return _text_result(f"Stopped Clear View service {service_id} on {camera.name}")
+async def _h_set_io_port(cam, client, args):
+    await io_ports.set_port_state(client, port=args["port"], state=args["state"])
+    return _text_result(f"Set port {args['port']} on {cam.name} to '{args['state']}'")
 
-    # --- Privacy Mask tools ---
-    if name == "list_privacy_masks":
-        _check_capability(camera, "privacy_mask")
-        masks = await privacy_mask.list_masks(client)
-        return _text_result(masks)
 
-    if name == "add_privacy_mask":
-        _check_capability(camera, "privacy_mask")
-        await privacy_mask.add_mask(
-            client,
-            name=args["name"],
-            width=args.get("width"),
-            height=args.get("height"),
-            center_x=args.get("center_x"),
-            center_y=args.get("center_y"),
-            polygon=args.get("polygon"),
-        )
-        return _text_result(f"Added privacy mask '{args['name']}' on {camera.name}")
+async def _h_get_lights(cam, client, args):
+    return _text_result(await light.get_light_information(client))
 
-    if name == "remove_privacy_mask":
-        _check_capability(camera, "privacy_mask")
-        await privacy_mask.remove_mask(client, name=args["name"])
-        return _text_result(f"Removed privacy mask '{args['name']}' from {camera.name}")
 
-    # --- Recording Export ---
-    if name == "export_recording":
-        _check_capability(camera, "storage")
-        filename = args.get("filename") or f"{args['recording_id']}.mkv"
-        output_path = f"/exports/{filename}"
-        result = await storage.export_recording(
-            client,
-            recording_id=args["recording_id"],
-            disk_id=args["disk_id"],
-            output_path=output_path,
-            start_time=args.get("start_time"),
-            stop_time=args.get("stop_time"),
-        )
-        return _text_result(result)
+async def _h_toggle_light(cam, client, args):
+    light_id, on = args["light_id"], args["on"]
+    if on:
+        await light.activate_light(client, light_id)
+        return _text_result(f"Activated light '{light_id}' on {cam.name}")
+    await light.deactivate_light(client, light_id)
+    return _text_result(f"Deactivated light '{light_id}' on {cam.name}")
 
-    # --- Time API ---
-    if name == "get_time_info":
-        _check_capability(camera, "time")
-        info = await time_service.get_date_time_info(client)
-        return _text_result(info)
 
-    if name == "set_timezone":
-        _check_capability(camera, "time")
-        tz = args["timezone"]
-        await time_service.set_timezone(client, tz)
-        return _text_result(f"Set timezone on {camera.name} to '{tz}'")
+async def _h_discover_apis(cam, client, args):
+    return _text_result(await discovery.get_api_list(client))
 
-    # --- Day/Night ---
-    if name == "get_daynight_config":
-        _check_capability(camera, "daynight")
-        channel = args.get("channel", 0)
-        config_data = await daynight.get_configuration(client, channel=channel)
-        return _text_result(config_data)
 
-    if name == "set_daynight_config":
-        _check_capability(camera, "daynight")
-        channel = args.get("channel", 0)
-        settings = {k: v for k, v in args.items() if k not in ("camera_id", "channel")}
-        await daynight.set_configuration(client, channel=channel, **settings)
-        return _text_result(f"Updated day/night configuration on {camera.name}")
+async def _h_list_overlays(cam, client, args):
+    return _text_result(await overlay.list_overlays(client))
 
-    # --- Stream Profiles ---
-    if name == "list_stream_profiles":
-        _check_capability(camera, "stream_profiles")
-        result = await stream_profiles.list_profiles(client, name=args.get("name"))
-        return _text_result(result)
 
-    if name == "create_stream_profile":
-        _check_capability(camera, "stream_profiles")
-        await stream_profiles.create_profile(
-            client,
-            name=args["name"],
-            parameters=args["parameters"],
-            description=args.get("description", ""),
-        )
-        return _text_result(f"Created stream profile '{args['name']}' on {camera.name}")
+async def _h_add_overlay(cam, client, args):
+    identity = await overlay.add_text(
+        client, text=args["text"], position=args.get("position", "topLeft"),
+        text_color=args.get("text_color", "white"), text_bg_color=args.get("text_bg_color", "transparent"),
+    )
+    return _text_result(f"Added text overlay on {cam.name} (identity={identity})")
 
-    if name == "remove_stream_profile":
-        _check_capability(camera, "stream_profiles")
-        await stream_profiles.remove_profile(client, name=args["name"])
-        return _text_result(f"Removed stream profile '{args['name']}' from {camera.name}")
 
-    # --- Geolocation ---
-    if name == "get_geolocation":
-        _check_capability(camera, "geolocation")
-        location = await geolocation.get_location(client)
-        return _text_result(location)
+async def _h_remove_overlay(cam, client, args):
+    await overlay.remove_overlay(client, identity=args["identity"])
+    return _text_result(f"Removed overlay {args['identity']} from {cam.name}")
 
-    if name == "set_geolocation":
-        _check_capability(camera, "geolocation")
-        await geolocation.set_location(
-            client,
-            lat=args.get("lat"),
-            lng=args.get("lng"),
-            heading=args.get("heading"),
-            text=args.get("text"),
-        )
-        return _text_result(f"Updated geolocation on {camera.name}")
 
-    # --- Audio Control ---
-    if name == "get_audio_settings":
-        _check_capability(camera, "audio")
-        settings = await audio.get_settings(client)
-        return _text_result(settings)
+async def _h_get_motion_config(cam, client, args):
+    return _text_result(await vmd.get_configuration(client))
 
-    if name == "set_audio_settings":
-        _check_capability(camera, "audio")
-        await audio.set_settings(client, devices=args["devices"])
-        return _text_result(f"Updated audio settings on {camera.name}")
 
-    # --- Event Polling ---
-    if name == "poll_events":
-        _check_capability(camera, "events")
-        collected = await events.poll_events(
-            client,
-            duration_seconds=args.get("duration", 5),
-            topic_filter=args.get("topic_filter"),
-        )
-        return _text_result({
-            "events_collected": len(collected),
-            "events": collected,
-        })
+async def _h_set_motion_config(cam, client, args):
+    await vmd.set_configuration(client, cameras=args["cameras"], profiles=args["profiles"])
+    return _text_result(f"Updated motion detection configuration on {cam.name}")
 
-    raise ValueError(f"Unknown tool: {name}")
+
+async def _h_list_guard_tours(cam, client, args):
+    return _text_result(await guard_tour.list_tours(client))
+
+
+async def _h_start_guard_tour(cam, client, args):
+    await guard_tour.start_tour(client, tour_id=args["tour_id"])
+    return _text_result(f"Started guard tour {args['tour_id']} on {cam.name}")
+
+
+async def _h_stop_guard_tour(cam, client, args):
+    await guard_tour.stop_tour(client, tour_id=args["tour_id"])
+    return _text_result(f"Stopped guard tour {args['tour_id']} on {cam.name}")
+
+
+async def _h_get_siren_status(cam, client, args):
+    return _text_result(await siren.get_status(client))
+
+
+async def _h_activate_siren(cam, client, args):
+    profile_name = args.get("profile")
+    if profile_name:
+        result = await siren.start(client, profile=profile_name)
+    else:
+        siren_config = None
+        light_config = None
+        if args.get("siren_pattern"):
+            siren_config = {"pattern": args["siren_pattern"]}
+            if args.get("siren_intensity"):
+                siren_config["intensity"] = args["siren_intensity"]
+        if args.get("light_pattern"):
+            light_config = {"pattern": args["light_pattern"], "speed": 1}
+            if args.get("light_colors"):
+                light_config["colors"] = args["light_colors"]
+            if args.get("light_intensity"):
+                light_config["intensity"] = args["light_intensity"]
+        result = await siren.start(client, siren=siren_config, light=light_config, duration=args.get("duration"))
+    return _text_result(f"Activated siren/light on {cam.name}: {result}")
+
+
+async def _h_stop_siren(cam, client, args):
+    await siren.stop(client)
+    return _text_result(f"Stopped siren and light on {cam.name}")
+
+
+async def _h_get_disk_status(cam, client, args):
+    return _text_result(await storage.list_disks(client))
+
+
+async def _h_list_recordings(cam, client, args):
+    return _text_result(await storage.list_recordings(
+        client, disk_id=args.get("disk_id"), start_time=args.get("start_time"),
+        stop_time=args.get("stop_time"), max_recordings=args.get("max_recordings"),
+    ))
+
+
+async def _h_get_recording_info(cam, client, args):
+    return _text_result(await storage.get_export_properties(
+        client, recording_id=args["recording_id"], disk_id=args["disk_id"],
+        start_time=args.get("start_time"), stop_time=args.get("stop_time"),
+    ))
+
+
+async def _h_export_recording(cam, client, args):
+    filename = args.get("filename") or f"{args['recording_id']}.mkv"
+    return _text_result(await storage.export_recording(
+        client, recording_id=args["recording_id"], disk_id=args["disk_id"],
+        output_path=f"/exports/{filename}",
+        start_time=args.get("start_time"), stop_time=args.get("stop_time"),
+    ))
+
+
+async def _h_get_clear_view_info(cam, client, args):
+    return _text_result(await clear_view.get_service_info(client))
+
+
+async def _h_start_clear_view(cam, client, args):
+    sid, dur = args.get("service_id", 0), args.get("duration")
+    await clear_view.start(client, service_id=sid, duration=dur)
+    return _text_result(f"Started Clear View service {sid} on {cam.name}" + (f" (duration={dur}s)" if dur else ""))
+
+
+async def _h_stop_clear_view(cam, client, args):
+    sid = args.get("service_id", 0)
+    await clear_view.stop(client, service_id=sid)
+    return _text_result(f"Stopped Clear View service {sid} on {cam.name}")
+
+
+async def _h_list_privacy_masks(cam, client, args):
+    return _text_result(await privacy_mask.list_masks(client))
+
+
+async def _h_add_privacy_mask(cam, client, args):
+    await privacy_mask.add_mask(
+        client, name=args["name"], width=args.get("width"), height=args.get("height"),
+        center_x=args.get("center_x"), center_y=args.get("center_y"), polygon=args.get("polygon"),
+    )
+    return _text_result(f"Added privacy mask '{args['name']}' on {cam.name}")
+
+
+async def _h_remove_privacy_mask(cam, client, args):
+    await privacy_mask.remove_mask(client, name=args["name"])
+    return _text_result(f"Removed privacy mask '{args['name']}' from {cam.name}")
+
+
+async def _h_get_time_info(cam, client, args):
+    return _text_result(await time_service.get_date_time_info(client))
+
+
+async def _h_set_timezone(cam, client, args):
+    tz = args["timezone"]
+    await time_service.set_timezone(client, tz)
+    return _text_result(f"Set timezone on {cam.name} to '{tz}'")
+
+
+async def _h_get_daynight_config(cam, client, args):
+    return _text_result(await daynight.get_configuration(client, channel=args.get("channel", 0)))
+
+
+async def _h_set_daynight_config(cam, client, args):
+    channel = args.get("channel", 0)
+    settings = {k: v for k, v in args.items() if k not in ("camera_id", "channel")}
+    await daynight.set_configuration(client, channel=channel, **settings)
+    return _text_result(f"Updated day/night configuration on {cam.name}")
+
+
+async def _h_list_stream_profiles(cam, client, args):
+    return _text_result(await stream_profiles.list_profiles(client, name=args.get("name")))
+
+
+async def _h_create_stream_profile(cam, client, args):
+    await stream_profiles.create_profile(client, name=args["name"], parameters=args["parameters"], description=args.get("description", ""))
+    return _text_result(f"Created stream profile '{args['name']}' on {cam.name}")
+
+
+async def _h_remove_stream_profile(cam, client, args):
+    await stream_profiles.remove_profile(client, name=args["name"])
+    return _text_result(f"Removed stream profile '{args['name']}' from {cam.name}")
+
+
+async def _h_get_geolocation(cam, client, args):
+    return _text_result(await geolocation.get_location(client))
+
+
+async def _h_set_geolocation(cam, client, args):
+    await geolocation.set_location(client, lat=args.get("lat"), lng=args.get("lng"), heading=args.get("heading"), text=args.get("text"))
+    return _text_result(f"Updated geolocation on {cam.name}")
+
+
+async def _h_get_audio_settings(cam, client, args):
+    return _text_result(await audio.get_settings(client))
+
+
+async def _h_set_audio_settings(cam, client, args):
+    await audio.set_settings(client, devices=args["devices"])
+    return _text_result(f"Updated audio settings on {cam.name}")
+
+
+async def _h_poll_events(cam, client, args):
+    collected = await events.poll_events(client, duration_seconds=args.get("duration", 5), topic_filter=args.get("topic_filter"))
+    return _text_result({"events_collected": len(collected), "events": collected})
+
+
+async def _h_get_capture_modes(cam, client, args):
+    return _text_result(await capture_mode.get_capture_modes(client))
+
+
+async def _h_set_capture_mode(cam, client, args):
+    channel = args.get("channel", 0)
+    await capture_mode.set_capture_mode(client, channel=channel, capture_mode_id=args["capture_mode_id"])
+    return _text_result(f"Capture mode set to {args['capture_mode_id']} on {cam.name} (channel {channel}). Camera reboot required.")
+
+
+async def _h_get_orientation(cam, client, args):
+    return _text_result(await orientation.get_orientation(client))
+
+
+async def _h_get_ntp_status(cam, client, args):
+    return _text_result(await ntp.get_ntp_info(client))
+
+
+async def _h_set_ntp_config(cam, client, args):
+    await ntp.set_ntp_config(client, enabled=args.get("enabled"), servers_source=args.get("servers_source"), static_servers=args.get("static_servers"))
+    return _text_result(f"Updated NTP configuration on {cam.name}")
+
+
+async def _h_list_analytics_producers(cam, client, args):
+    return _text_result(await analytics_metadata.list_producers(client))
+
+
+async def _h_set_analytics_producers(cam, client, args):
+    await analytics_metadata.set_enabled_producers(client, producers=args["producers"])
+    return _text_result(f"Updated analytics producers on {cam.name}")
+
+
+# Handler registry: tool_name → (required_capability_or_None, handler_function)
+_CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
+    "get_camera_info": (None, _h_get_camera_info),
+    "get_snapshot": ("snapshot", _h_get_snapshot),
+    "ptz_move": ("ptz", _h_ptz_move),
+    "ptz_relative": ("ptz", _h_ptz_relative),
+    "ptz_home": ("ptz", _h_ptz_home),
+    "ptz_preset": ("ptz", _h_ptz_preset),
+    "ptz_status": ("ptz", _h_ptz_status),
+    "get_io_ports": ("io", _h_get_io_ports),
+    "set_io_port": ("io", _h_set_io_port),
+    "get_lights": ("light", _h_get_lights),
+    "toggle_light": ("light", _h_toggle_light),
+    "discover_apis": (None, _h_discover_apis),
+    "list_overlays": ("overlay", _h_list_overlays),
+    "add_overlay": ("overlay", _h_add_overlay),
+    "remove_overlay": ("overlay", _h_remove_overlay),
+    "get_motion_config": ("vmd", _h_get_motion_config),
+    "set_motion_config": ("vmd", _h_set_motion_config),
+    "list_guard_tours": ("guard_tour", _h_list_guard_tours),
+    "start_guard_tour": ("guard_tour", _h_start_guard_tour),
+    "stop_guard_tour": ("guard_tour", _h_stop_guard_tour),
+    "get_siren_status": ("siren", _h_get_siren_status),
+    "activate_siren": ("siren", _h_activate_siren),
+    "stop_siren": ("siren", _h_stop_siren),
+    "get_disk_status": ("storage", _h_get_disk_status),
+    "list_recordings": ("storage", _h_list_recordings),
+    "get_recording_info": ("storage", _h_get_recording_info),
+    "export_recording": ("storage", _h_export_recording),
+    "get_clear_view_info": ("clear_view", _h_get_clear_view_info),
+    "start_clear_view": ("clear_view", _h_start_clear_view),
+    "stop_clear_view": ("clear_view", _h_stop_clear_view),
+    "list_privacy_masks": ("privacy_mask", _h_list_privacy_masks),
+    "add_privacy_mask": ("privacy_mask", _h_add_privacy_mask),
+    "remove_privacy_mask": ("privacy_mask", _h_remove_privacy_mask),
+    "get_time_info": ("time", _h_get_time_info),
+    "set_timezone": ("time", _h_set_timezone),
+    "get_daynight_config": ("daynight", _h_get_daynight_config),
+    "set_daynight_config": ("daynight", _h_set_daynight_config),
+    "list_stream_profiles": ("stream_profiles", _h_list_stream_profiles),
+    "create_stream_profile": ("stream_profiles", _h_create_stream_profile),
+    "remove_stream_profile": ("stream_profiles", _h_remove_stream_profile),
+    "get_geolocation": ("geolocation", _h_get_geolocation),
+    "set_geolocation": ("geolocation", _h_set_geolocation),
+    "get_audio_settings": ("audio", _h_get_audio_settings),
+    "set_audio_settings": ("audio", _h_set_audio_settings),
+    "poll_events": ("events", _h_poll_events),
+    "get_capture_modes": ("capture_mode", _h_get_capture_modes),
+    "set_capture_mode": ("capture_mode", _h_set_capture_mode),
+    "get_orientation": ("orientation", _h_get_orientation),
+    "get_ntp_status": ("ntp", _h_get_ntp_status),
+    "set_ntp_config": ("ntp", _h_set_ntp_config),
+    "list_analytics_producers": ("analytics_metadata", _h_list_analytics_producers),
+    "set_analytics_producers": ("analytics_metadata", _h_set_analytics_producers),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1492,7 +1819,7 @@ async def main():
     parser = argparse.ArgumentParser(description="VPX MCP Server")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "sse", "streamable-http"],
         default="stdio",
         help="MCP transport mode (default: stdio)",
     )
@@ -1500,7 +1827,7 @@ async def main():
         "--port",
         type=int,
         default=8080,
-        help="HTTP port for SSE transport (default: 8080)",
+        help="HTTP port for SSE/streamable-http transport (default: 8080)",
     )
     parser.add_argument(
         "--config",
@@ -1518,6 +1845,11 @@ async def main():
         len(config.cameras),
         ", ".join(f"{c.id} ({c.name})" for c in config.cameras),
     )
+
+    # Auto-detect capabilities for cameras with "auto" in capabilities
+    for cam in config.cameras:
+        if "auto" in cam.capabilities:
+            await _auto_detect_capabilities(cam)
 
     if args.transport == "stdio":
         from mcp.server.stdio import stdio_server
@@ -1550,6 +1882,32 @@ async def main():
             routes=[
                 Route("/sse", endpoint=handle_sse),
                 Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
+            ],
+        )
+        uvicorn.run(starlette_app, host="0.0.0.0", port=args.port)
+
+    elif args.transport == "streamable-http":
+        from mcp.server.streamable_http import StreamableHTTPServerTransport
+        from starlette.applications import Starlette
+        from starlette.routing import Mount
+        import uvicorn
+
+        transport = StreamableHTTPServerTransport(
+            mcp_endpoint="/mcp",
+            is_json=True,
+        )
+
+        async def handle_mcp(scope, receive, send):
+            async with transport.connect(scope, receive, send) as streams:
+                await app.run(
+                    streams[0],
+                    streams[1],
+                    app.create_initialization_options(),
+                )
+
+        starlette_app = Starlette(
+            routes=[
+                Mount("/mcp", app=handle_mcp),
             ],
         )
         uvicorn.run(starlette_app, host="0.0.0.0", port=args.port)

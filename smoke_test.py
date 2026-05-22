@@ -9,6 +9,7 @@ from config import load_config
 from vapix.client import VapixClient, VapixError
 from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
 from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
+from vapix import capture_mode, orientation, ntp, analytics_metadata
 
 
 async def main():
@@ -432,6 +433,78 @@ async def main():
             fail += 1
     else:
         print("\n--- event polling --- SKIPPED (event-streaming-over-websocket not supported)")
+        skip += 1
+
+    # --- Phase 3 APIs ---
+
+    # Capture Mode
+    if "capture-mode" in supported_apis:
+        print("\n--- capture_mode get_capture_modes ---")
+        try:
+            modes = await capture_mode.get_capture_modes(client)
+            for ch in modes:
+                print(f"  Channel {ch.get('channel', '?')}:")
+                for m in ch.get("captureMode", []):
+                    enabled = "ACTIVE" if m.get("enabled") else ""
+                    print(f"    [{m.get('captureModeId')}] {m.get('description', '?')} {enabled}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- capture_mode --- SKIPPED (capture-mode not supported)")
+        skip += 1
+
+    # Orientation Sensor
+    print("\n--- orientation get_orientation (trying) ---")
+    try:
+        orient = await orientation.get_orientation(client)
+        if orient.get("available"):
+            print(f"  Longitudinal: {orient.get('longitudinal', '?')}°")
+            print(f"  Lateral: {orient.get('lateral', '?')}°")
+        else:
+            print("  Orientation sensor not available on this camera")
+        ok += 1
+    except Exception as e:
+        print(f"  SKIPPED: {type(e).__name__}: {e}")
+        skip += 1
+
+    # NTP
+    if "ntp" in supported_apis:
+        print("\n--- ntp get_ntp_info ---")
+        try:
+            ntp_info = await ntp.get_ntp_info(client)
+            c = ntp_info.get("client", {})
+            print(f"  Enabled: {c.get('enabled', '?')}")
+            print(f"  Source: {c.get('serversSource', '?')}")
+            print(f"  Synced: {c.get('synced', '?')}")
+            servers = c.get("staticServers", [])
+            if servers:
+                print(f"  Servers: {', '.join(servers)}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- ntp --- SKIPPED (ntp not supported)")
+        skip += 1
+
+    # Analytics Metadata Config
+    if "analytics-metadata-config" in supported_apis:
+        print("\n--- analytics_metadata list_producers ---")
+        try:
+            producers = await analytics_metadata.list_producers(client)
+            for p in producers:
+                channels = p.get("videochannels", [])
+                enabled_ch = [c for c in channels if c.get("enabled")]
+                print(f"  {p.get('name', '?')} ({p.get('niceName', '')}): "
+                      f"{len(enabled_ch)}/{len(channels)} channels enabled")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- analytics_metadata --- SKIPPED (analytics-metadata-config not supported)")
         skip += 1
 
     await client.close()

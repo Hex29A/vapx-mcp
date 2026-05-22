@@ -149,6 +149,46 @@ Checked items are implemented, tested, and available as MCP tools.
   - Pros: AI can check what's happening on a camera right now (motion, I/O, tampering).
   - Cons: Polling approach (not persistent subscription). Requires `websockets` package. Requires `events` capability.
 
+- [x] **Capture Mode** — `vapix/capture_mode.py`
+  - Endpoint: `POST /axis-cgi/capturemode.cgi`
+  - Tools: `get_capture_modes`, `set_capture_mode`
+  - Read-write. List and change video capture modes (resolution/FPS combinations).
+  - Pros: AI can optimize resolution vs frame rate per scenario.
+  - Cons: Changing mode requires camera reboot. Requires `capture_mode` capability.
+
+- [x] **Orientation Sensor** — `vapix/orientation.py`
+  - Endpoints: `GET /axis-cgi/orientation/getlongitudinalvalue.cgi`, `GET /axis-cgi/orientation/getlateralvalue.cgi`
+  - Tools: `get_orientation`
+  - Read-only. Physical mounting angle from accelerometer/gyroscope.
+  - **Note**: Legacy XML API. Not video rotation — physical sensor data.
+  - Pros: Verify camera is level. Detect tampering (tilt changes).
+  - Cons: Not all cameras have orientation sensors. Requires `orientation` capability.
+
+- [x] **NTP** — `vapix/ntp.py`
+  - Endpoint: `POST /axis-cgi/ntp.cgi`
+  - Tools: `get_ntp_status`, `set_ntp_config`
+  - Read-write. Check NTP sync status and configure time servers.
+  - Pros: Verify time synchronization. Fleet-wide NTP consistency checks.
+  - Cons: Configuration task. Requires `ntp` capability.
+
+- [x] **Analytics Metadata Config** — `vapix/analytics_metadata.py`
+  - Endpoint: `POST /axis-cgi/analyticsmetadataconfig.cgi`
+  - Tools: `list_analytics_producers`, `set_analytics_producers`
+  - Read-write. Enable/disable analytics metadata producers (object detection, motion tracking).
+  - Pros: Control what analytics data is generated. Enable only needed producers.
+  - Cons: Requires AXIS Object Analytics or similar ACAP. Requires `analytics_metadata` capability.
+
+---
+
+## Server Features (Non-API)
+
+- [x] **Auto-capability detection** — Queries API Discovery and maps supported APIs to capabilities automatically.
+- [x] **Multi-camera batch tools** — `snapshot_all` and `status_all` for fleet operations.
+- [x] **MCP Resources** — `camera://{id}/snapshot` and `camera://{id}/info` URIs.
+- [x] **Streamable HTTP transport** — `--transport streamable-http` for latest MCP protocol.
+- [x] **Typed dispatch** — Handler-function registry replaces if/elif chain.
+- [x] **GitHub Actions CI** — Automated linting + Docker test builds.
+
 ---
 
 ## Future Candidates (Second Tier)
