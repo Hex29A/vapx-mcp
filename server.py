@@ -1906,7 +1906,9 @@ async def main():
                 Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
             ],
         )
-        uvicorn.run(starlette_app, host="0.0.0.0", port=args.port)
+        uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
+        server = uvicorn.Server(uv_config)
+        await server.serve()
 
     elif args.transport == "streamable-http":
         import uvicorn
@@ -1932,7 +1934,9 @@ async def main():
                 Mount("/mcp", app=handle_mcp),
             ],
         )
-        uvicorn.run(starlette_app, host="0.0.0.0", port=args.port)
+        uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
+        server = uvicorn.Server(uv_config)
+        await server.serve()
 
 
 if __name__ == "__main__":
