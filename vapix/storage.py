@@ -5,14 +5,16 @@ Endpoints:
     GET /axis-cgi/disks/list.cgi       — list disks (SD card, network share)
     GET /axis-cgi/disks/gethealth.cgi  — disk health (wear, temperature)
     GET /axis-cgi/record/list.cgi      — list recordings
-    GET /axis-cgi/record/export/properties.cgi — export properties (size, times)
+    GET /axis-cgi/record/export/properties.cgi  — export properties (size, times)
+    GET /axis-cgi/record/export/exportrecording.cgi — download recording as .mkv
 
 Docs: https://developer.axis.com/vapix/network-video/edge-storage-api/
 
-All these APIs return XML. We parse it into Python dicts for JSON output.
-Only read-only operations are exposed — no formatting, mounting, or deletion.
+All these APIs return XML (except export which returns binary .mkv).
+We parse XML into Python dicts for JSON output.
 """
 
+import os
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -185,3 +187,65 @@ async def get_export_properties(
         raise Exception(f"Export error: {err.attrib}")
 
     return {"raw": text.strip()}
+
+
+async def export_recording(
+    client: VapixClient,
+    recording_id: str,
+    disk_id: str,
+    output_path: str,
+    *,
+    start_time: str | None = None,
+    stop_time: str | None = None,
+) -> dict[str, Any]:
+    """
+    Export a recording (or clip) as a .mkv file to the local filesystem.
+
+    Downloads the binary stream from the camera and writes it to output_path.
+    Use get_export_properties() first to check estimated file size.
+
+    Args:
+        recording_id: Recording ID from list_recordings.
+        disk_id: Disk ID where the recording is stored.
+        output_path: Local file path to write the .mkv file.
+        start_time: Optional clip start time (ISO 8601 UTC).
+        stop_time: Optional clip stop time.
+
+    Returns dict with:
+        path: Output file path
+        size_bytes: Actual file size in bytes
+    """
+    params: dict[str, Any] = {
+        "schemaversion": "1",
+        "recordingid": recording_id,
+        "diskid": disk_id,
+        "exportformat": "matroska",
+    }
+    if start_time:
+        params["starttime"] = start_time
+    if stop_time:
+        params["stoptime"] = stop_time
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    response = await client.get(
+        "/axis-cgi/record/export/exportrecording.cgi", params
+    )
+
+    # Check for XML error response
+    content_type = response.headers.get("content-type", "")
+    if "xml" in content_type or "text" in content_type:
+        text = response.text.strip()
+        if "Error" in text or "error" in text:
+            raise Exception(f"Export error: {text}")
+
+    # Write binary content to file
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+
+    file_size = os.path.getsize(output_path)
+    return {
+        "path": output_path,
+        "size_bytes": file_size,
+    }

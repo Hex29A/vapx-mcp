@@ -47,6 +47,7 @@ from mcp.types import (
 from config import AppConfig, CameraConfig, load_config
 from vapix.client import VapixClient, VapixError
 from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
+from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -753,6 +754,317 @@ TOOLS = [
             "required": ["camera_id", "name"],
         },
     ),
+    # --- Recording Export ---
+    Tool(
+        name="export_recording",
+        description=(
+            "Export a recording from the camera's edge storage as a .mkv file. "
+            "Downloads to the server's /exports/ directory. Use list_recordings first "
+            "to find recording IDs, and get_recording_info to check file size."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "recording_id": {
+                    "type": "string",
+                    "description": "Recording ID from list_recordings",
+                },
+                "disk_id": {
+                    "type": "string",
+                    "description": "Disk ID where the recording is stored",
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "Optional clip start time (ISO 8601 UTC)",
+                },
+                "stop_time": {
+                    "type": "string",
+                    "description": "Optional clip stop time",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Output filename (default: recording_id.mkv)",
+                },
+            },
+            "required": ["camera_id", "recording_id", "disk_id"],
+        },
+    ),
+    # --- Time API ---
+    Tool(
+        name="get_time_info",
+        description=(
+            "Get the camera's current date/time, timezone, and DST status."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_timezone",
+        description=(
+            "Set the camera's timezone using an IANA timezone name "
+            '(e.g. "Europe/Stockholm", "America/New_York", "Asia/Tokyo").'
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "timezone": {
+                    "type": "string",
+                    "description": 'IANA timezone name (e.g. "Europe/Stockholm")',
+                },
+            },
+            "required": ["camera_id", "timezone"],
+        },
+    ),
+    # --- Day/Night ---
+    Tool(
+        name="get_daynight_config",
+        description=(
+            "Get the day/night (IR-cut filter) configuration for a camera — "
+            "shift levels, dwell times, auto-tune, and IR-pass filter settings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "channel": {
+                    "type": "integer",
+                    "description": "Video channel (default 0)",
+                    "default": 0,
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_daynight_config",
+        description=(
+            "Configure day/night switching behavior — thresholds for switching "
+            "between day mode (color) and night mode (IR/B&W)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "channel": {
+                    "type": "integer",
+                    "description": "Video channel (default 0)",
+                    "default": 0,
+                },
+                "DayNightShiftLevel": {
+                    "type": "integer",
+                    "description": "Day→Night threshold (0-100, higher = darker before switching)",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+                "NightDayShiftLevel": {
+                    "type": "integer",
+                    "description": "Night→Day threshold (0-100)",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+                "DayNightDwellTime": {
+                    "type": "integer",
+                    "description": "Seconds to wait before day→night switch (1-600)",
+                    "minimum": 1,
+                    "maximum": 600,
+                },
+                "NightDayDwellTime": {
+                    "type": "integer",
+                    "description": "Seconds to wait before night→day switch (1-600)",
+                    "minimum": 1,
+                    "maximum": 600,
+                },
+                "Autotune": {
+                    "type": "boolean",
+                    "description": "Enable auto-tuning of shift levels",
+                },
+                "NightFilter": {
+                    "type": "string",
+                    "enum": ["irpass", "clear"],
+                    "description": "Night filter mode: 'irpass' for IR, 'clear' for visible light",
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- Stream Profiles ---
+    Tool(
+        name="list_stream_profiles",
+        description=(
+            "List video stream profiles — preset configurations for resolution, "
+            "codec, FPS, and other streaming parameters."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "name": {
+                    "type": "string",
+                    "description": "Specific profile name to query (omit for all)",
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="create_stream_profile",
+        description=(
+            "Create a new video stream profile with specified parameters. "
+            "Parameters are URL-encoded (e.g. 'resolution=1920x1080&fps=30&videocodec=h264')."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "name": {
+                    "type": "string",
+                    "description": "Unique profile name",
+                },
+                "parameters": {
+                    "type": "string",
+                    "description": "URL-encoded parameter string (e.g. 'resolution=1920x1080&fps=30')",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description",
+                    "default": "",
+                },
+            },
+            "required": ["camera_id", "name", "parameters"],
+        },
+    ),
+    Tool(
+        name="remove_stream_profile",
+        description="Remove a video stream profile by name.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "name": {
+                    "type": "string",
+                    "description": "Name of the profile to remove",
+                },
+            },
+            "required": ["camera_id", "name"],
+        },
+    ),
+    # --- Geolocation ---
+    Tool(
+        name="get_geolocation",
+        description=(
+            "Get the camera's configured GPS coordinates (latitude, longitude), "
+            "compass heading, and location description text."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_geolocation",
+        description=(
+            "Set the camera's GPS coordinates and heading. "
+            "Coordinates are WGS-84 decimal degrees."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "lat": {
+                    "type": "number",
+                    "description": "Latitude in decimal degrees",
+                },
+                "lng": {
+                    "type": "number",
+                    "description": "Longitude in decimal degrees",
+                },
+                "heading": {
+                    "type": "number",
+                    "description": "Compass heading in degrees (0-360)",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Location description text",
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- Audio Control ---
+    Tool(
+        name="get_audio_settings",
+        description=(
+            "Get audio device settings — input/output configuration, "
+            "gain levels, mute status, and connection types."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_audio_settings",
+        description=(
+            "Update audio device settings — change gain, mute, "
+            "or input source. Pass the devices array from get_audio_settings "
+            "with modifications."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "devices": {
+                    "type": "array",
+                    "description": "Array of device settings (structure from get_audio_settings)",
+                },
+            },
+            "required": ["camera_id", "devices"],
+        },
+    ),
+    # --- Event Polling ---
+    Tool(
+        name="poll_events",
+        description=(
+            "Poll for camera events over WebSocket for a specified duration. "
+            "Returns a batch of events (motion, I/O changes, tampering, etc.). "
+            "Useful for checking what's happening on a camera right now."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "duration": {
+                    "type": "number",
+                    "description": "How long to listen for events in seconds (1-30, default 5)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 30,
+                },
+                "topic_filter": {
+                    "type": "string",
+                    "description": (
+                        'Optional ONVIF topic filter (e.g. '
+                        '"tns1:Device/tnsaxis:IO/VirtualPort", '
+                        '"tns1:RuleEngine/MotionRegionDetector/Motion")'
+                    ),
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
 ]
 
 
@@ -1065,6 +1377,109 @@ async def _dispatch_tool(
         _check_capability(camera, "privacy_mask")
         await privacy_mask.remove_mask(client, name=args["name"])
         return _text_result(f"Removed privacy mask '{args['name']}' from {camera.name}")
+
+    # --- Recording Export ---
+    if name == "export_recording":
+        _check_capability(camera, "storage")
+        filename = args.get("filename") or f"{args['recording_id']}.mkv"
+        output_path = f"/exports/{filename}"
+        result = await storage.export_recording(
+            client,
+            recording_id=args["recording_id"],
+            disk_id=args["disk_id"],
+            output_path=output_path,
+            start_time=args.get("start_time"),
+            stop_time=args.get("stop_time"),
+        )
+        return _text_result(result)
+
+    # --- Time API ---
+    if name == "get_time_info":
+        _check_capability(camera, "time")
+        info = await time_service.get_date_time_info(client)
+        return _text_result(info)
+
+    if name == "set_timezone":
+        _check_capability(camera, "time")
+        tz = args["timezone"]
+        await time_service.set_timezone(client, tz)
+        return _text_result(f"Set timezone on {camera.name} to '{tz}'")
+
+    # --- Day/Night ---
+    if name == "get_daynight_config":
+        _check_capability(camera, "daynight")
+        channel = args.get("channel", 0)
+        config_data = await daynight.get_configuration(client, channel=channel)
+        return _text_result(config_data)
+
+    if name == "set_daynight_config":
+        _check_capability(camera, "daynight")
+        channel = args.get("channel", 0)
+        settings = {k: v for k, v in args.items() if k not in ("camera_id", "channel")}
+        await daynight.set_configuration(client, channel=channel, **settings)
+        return _text_result(f"Updated day/night configuration on {camera.name}")
+
+    # --- Stream Profiles ---
+    if name == "list_stream_profiles":
+        _check_capability(camera, "stream_profiles")
+        result = await stream_profiles.list_profiles(client, name=args.get("name"))
+        return _text_result(result)
+
+    if name == "create_stream_profile":
+        _check_capability(camera, "stream_profiles")
+        await stream_profiles.create_profile(
+            client,
+            name=args["name"],
+            parameters=args["parameters"],
+            description=args.get("description", ""),
+        )
+        return _text_result(f"Created stream profile '{args['name']}' on {camera.name}")
+
+    if name == "remove_stream_profile":
+        _check_capability(camera, "stream_profiles")
+        await stream_profiles.remove_profile(client, name=args["name"])
+        return _text_result(f"Removed stream profile '{args['name']}' from {camera.name}")
+
+    # --- Geolocation ---
+    if name == "get_geolocation":
+        _check_capability(camera, "geolocation")
+        location = await geolocation.get_location(client)
+        return _text_result(location)
+
+    if name == "set_geolocation":
+        _check_capability(camera, "geolocation")
+        await geolocation.set_location(
+            client,
+            lat=args.get("lat"),
+            lng=args.get("lng"),
+            heading=args.get("heading"),
+            text=args.get("text"),
+        )
+        return _text_result(f"Updated geolocation on {camera.name}")
+
+    # --- Audio Control ---
+    if name == "get_audio_settings":
+        _check_capability(camera, "audio")
+        settings = await audio.get_settings(client)
+        return _text_result(settings)
+
+    if name == "set_audio_settings":
+        _check_capability(camera, "audio")
+        await audio.set_settings(client, devices=args["devices"])
+        return _text_result(f"Updated audio settings on {camera.name}")
+
+    # --- Event Polling ---
+    if name == "poll_events":
+        _check_capability(camera, "events")
+        collected = await events.poll_events(
+            client,
+            duration_seconds=args.get("duration", 5),
+            topic_filter=args.get("topic_filter"),
+        )
+        return _text_result({
+            "events_collected": len(collected),
+            "events": collected,
+        })
 
     raise ValueError(f"Unknown tool: {name}")
 

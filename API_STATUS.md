@@ -82,12 +82,12 @@ Checked items are implemented, tested, and available as MCP tools.
 ## Implemented (continued)
 
 - [x] **Edge Storage** — `vapix/storage.py`
-  - Endpoints: `GET /axis-cgi/disks/list.cgi`, `GET /axis-cgi/disks/gethealth.cgi`, `GET /axis-cgi/record/list.cgi`, `GET /axis-cgi/record/export/properties.cgi`
-  - Tools: `get_disk_status`, `list_recordings`, `get_recording_info`
-  - Read-only. Check disk status/health, list recordings, get export metadata.
-  - **Note**: Unlike other APIs, these return XML (not JSON). Parsed internally.
-  - Pros: Monitor SD card health/space, find recordings by time range, check export sizes.
-  - Cons: Actual recording playback is RTSP (not feasible in MCP). Binary export not exposed. Requires `storage` capability.
+  - Endpoints: `GET /axis-cgi/disks/list.cgi`, `GET /axis-cgi/disks/gethealth.cgi`, `GET /axis-cgi/record/list.cgi`, `GET /axis-cgi/record/export/properties.cgi`, `GET /axis-cgi/record/export/exportrecording.cgi`
+  - Tools: `get_disk_status`, `list_recordings`, `get_recording_info`, `export_recording`
+  - Read-only/write. Check disk status/health, list recordings, get export metadata, download .mkv clips.
+  - **Note**: Unlike other APIs, these return XML (not JSON). Parsed internally. Export returns binary .mkv.
+  - Pros: Monitor SD card health/space, find recordings by time range, download footage for review.
+  - Cons: Large files need mounted volume. Long downloads for big clips. Requires `storage` capability.
 
 - [x] **Clear View** — `vapix/clear_view.py`
   - Endpoint: `POST /axis-cgi/clearviewcontrol.cgi`
@@ -105,62 +105,55 @@ Checked items are implemented, tested, and available as MCP tools.
   - Pros: AI can dynamically mask/unmask regions. Important for GDPR compliance.
   - Cons: Coordinate-based positioning. Requires `privacy_mask` capability.
 
+- [x] **Time Service** — `vapix/time_service.py`
+  - Endpoint: `POST /axis-cgi/time.cgi`
+  - Tools: `get_time_info`, `set_timezone`
+  - Read-write. Check/set camera date, time, and timezone.
+  - Pros: Multi-camera time sync verification. Simple API.
+  - Cons: Deprecated as of AXIS OS 12.4 (still functional). Requires `time` capability.
+
+- [x] **Day/Night** — `vapix/daynight.py`
+  - Endpoint: `POST /axis-cgi/daynight.cgi`
+  - Tools: `get_daynight_config`, `set_daynight_config`
+  - Read-write. Configure IR-cut filter switching thresholds and dwell times.
+  - Pros: Tune image quality for changing light conditions.
+  - Cons: Not available on all cameras. Requires `daynight` capability.
+
+- [x] **Stream Profiles** — `vapix/stream_profiles.py`
+  - Endpoint: `POST /axis-cgi/streamprofile.cgi`
+  - Tools: `list_stream_profiles`, `create_stream_profile`, `remove_stream_profile`
+  - Read-write. Manage video stream preset configurations (resolution, codec, FPS).
+  - Pros: Create optimized streaming profiles per scenario.
+  - Cons: Configuration task. Requires `stream_profiles` capability.
+
+- [x] **Geolocation** — `vapix/geolocation.py`
+  - Endpoints: `GET /axis-cgi/geolocation/get.cgi`, `GET /axis-cgi/geolocation/set.cgi`
+  - Tools: `get_geolocation`, `set_geolocation`
+  - Read-write. GPS coordinates (WGS-84) and compass heading.
+  - **Note**: Legacy XML API, not JSON POST pattern.
+  - Pros: Fleet management, map integration, spatial awareness.
+  - Cons: Manual coordinates (no GPS hardware on most cameras). Requires `geolocation` capability.
+
+- [x] **Audio Device Control** — `vapix/audio.py`
+  - Endpoint: `POST /axis-cgi/audiodevicecontrol.cgi`
+  - Tools: `get_audio_settings`, `set_audio_settings`
+  - Read-write. Configure audio input/output hardware (gain, mute, connection type).
+  - Pros: Tune audio for two-way communication. Check mic/speaker status.
+  - Cons: Audio streaming itself is RTSP (not practical via MCP). Requires `audio` capability.
+
+- [x] **Event Polling (WebSocket)** — `vapix/events.py`
+  - Endpoint: `ws://<device>/vapix/ws-data-stream?sources=events`
+  - Tools: `poll_events`
+  - Read-only. Opens a WebSocket, collects events for a specified duration (1-30s), returns batch.
+  - Uses session token authentication. Supports ONVIF topic filtering.
+  - Pros: AI can check what's happening on a camera right now (motion, I/O, tampering).
+  - Cons: Polling approach (not persistent subscription). Requires `websockets` package. Requires `events` capability.
+
 ---
 
 ## Future Candidates (Second Tier)
 
-- [ ] **Recording Export** — `vapix/storage.py` (extend)
-  - Endpoint: `GET /axis-cgi/record/export/exportrecording.cgi`
-  - Potential tools: `export_recording`
-  - Downloads .mkv video clips for a specific time interval to a Docker-mounted volume.
-  - Workflow: `list_recordings` → `get_recording_info` (check size) → `export_recording` → file on host.
-  - Pros: AI can retrieve actual video footage. Killer feature for incident review.
-  - Cons: Large files. Needs mounted volume. Long downloads for big clips. Should warn before exporting large files.
-
-- [ ] **Time API** — `vapix/time.py`
-  - Endpoint: `POST /axis-cgi/time.cgi`
-  - Potential tools: `get_time`, `set_timezone`
-  - Read-write. Diagnostics — check/fix camera time.
-  - Pros: Simple. Useful for multi-camera sync verification.
-  - Cons: Low frequency of use. NTP should handle this.
-
-- [ ] **Day/Night API** — `vapix/daynight.py`
-  - Endpoint: `POST /axis-cgi/daynight.cgi`
-  - Potential tools: `get_daynight_config`, `set_daynight_config`
-  - Read-write. Tune IR-cut filter auto-switching.
-  - Pros: Fix image quality issues in changing light.
-  - Cons: Niche. Most cameras handle this well automatically.
-
-- [ ] **Stream Profiles** — `vapix/stream_profiles.py`
-  - Endpoint: `POST /axis-cgi/streamprofile.cgi`
-  - Potential tools: `list_profiles`, `create_profile`
-  - Read-write. Configure video stream settings.
-  - Pros: Create optimized profiles per scenario.
-  - Cons: Configuration task, not operational. Rarely needed at runtime.
-
-- [ ] **Geolocation** — `vapix/geolocation.py`
-  - Endpoints: `/axis-cgi/geolocation/get.cgi`, `/axis-cgi/geolocation/set.cgi`
-  - Potential tools: `get_location`, `set_location`
-  - Read-write. GPS coordinates + heading.
-  - Pros: Fleet management, map integration.
-  - Cons: Coordinates are manual (no GPS module on most cameras).
-
-- [ ] **Audio Control** — `vapix/audio.py`
-  - Endpoints: `/axis-cgi/audio/receive.cgi`, `/axis-cgi/audio/transmit.cgi`
-  - Potential tools: `get_audio_config`, `enable_audio`
-  - Read-write. Two-way audio config.
-  - Pros: Intercom functionality configuration.
-  - Cons: Actual audio streaming is binary/RTSP — not practical via MCP.
-
-- [ ] **Event Streaming (WebSocket)** — `vapix/events.py`
-  - Endpoint: `ws://<device>/vapix/ws-data-stream?sources=events`
-  - Potential tools: `subscribe_events`, `get_recent_events`
-  - Read-only. Real-time event notifications.
-  - Pros: Foundation for reactive AI (motion alerts, I/O triggers, etc.).
-  - Cons: WebSocket requires persistent connection — complex for MCP tool model.
-    Long-lived subscriptions don't fit request/response pattern well.
-    May need MCP resources or sampling instead of tools.
-    Requires `websocket-client` or `websockets` dependency.
+All previous future candidates have been implemented. No remaining candidates at this time.
 
 ---
 

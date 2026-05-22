@@ -8,6 +8,7 @@ import socket
 from config import load_config
 from vapix.client import VapixClient, VapixError
 from vapix import device, imaging, ptz, io_ports, light, discovery, overlay, vmd, guard_tour, siren, storage, clear_view, privacy_mask
+from vapix import time_service, daynight, stream_profiles, geolocation, audio, events
 
 
 async def main():
@@ -309,6 +310,128 @@ async def main():
             fail += 1
     else:
         print("\n--- list_privacy_masks --- SKIPPED (privacy-mask not supported)")
+        skip += 1
+
+    # --- NEW APIs ---
+
+    # Time API
+    if "time-service" in supported_apis:
+        print("\n--- time get_date_time_info ---")
+        try:
+            info = await time_service.get_date_time_info(client)
+            print(f"  UTC: {info.get('dateTime', '?')}")
+            print(f"  TZ: {info.get('timeZone', '?')}")
+            print(f"  DST: {info.get('dstEnabled', '?')}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- time get_date_time_info --- SKIPPED (time-service not supported)")
+        skip += 1
+
+    # Stream Profiles
+    if "stream-profiles" in supported_apis:
+        print("\n--- stream_profiles list ---")
+        try:
+            result = await stream_profiles.list_profiles(client)
+            profiles = result.get("streamProfile", [])
+            max_p = result.get("maxProfiles", "?")
+            print(f"  Max profiles: {max_p}, Current: {len(profiles)}")
+            for p in profiles[:5]:
+                print(f"    \"{p.get('name', '?')}\": {p.get('parameters', '')[:60]}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- stream_profiles list --- SKIPPED (stream-profiles not supported)")
+        skip += 1
+
+    # Audio Control
+    if "audio-device-control" in supported_apis:
+        print("\n--- audio get_settings ---")
+        try:
+            settings = await audio.get_settings(client)
+            devices_list = settings.get("devices", [])
+            print(f"  Audio devices: {len(devices_list)}")
+            for d in devices_list:
+                inputs = d.get("inputs", [])
+                outputs = d.get("outputs", [])
+                print(f"    Device {d.get('deviceId', '?')}: "
+                      f"{len(inputs)} inputs, {len(outputs)} outputs")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- audio get_settings --- SKIPPED (audio-device-control not supported)")
+        skip += 1
+
+    # Day/Night (may not be in discovery on all cameras)
+    print("\n--- daynight get_configuration (trying) ---")
+    try:
+        dn_config = await daynight.get_configuration(client)
+        print(f"  DayNightShiftLevel: {dn_config.get('DayNightShiftLevel', '?')}")
+        print(f"  Autotune: {dn_config.get('Autotune', '?')}")
+        print(f"  NightFilter: {dn_config.get('NightFilter', '?')}")
+        ok += 1
+    except Exception as e:
+        print(f"  SKIPPED: {type(e).__name__}: {e}")
+        skip += 1
+
+    # Geolocation (legacy API, may not be on all cameras)
+    print("\n--- geolocation get_location (trying) ---")
+    try:
+        loc = await geolocation.get_location(client)
+        print(f"  Lat: {loc.get('Lat', '?')}, Lng: {loc.get('Lng', '?')}")
+        print(f"  Heading: {loc.get('Heading', '?')}, Text: {loc.get('Text', '')}")
+        ok += 1
+    except Exception as e:
+        print(f"  SKIPPED: {type(e).__name__}: {e}")
+        skip += 1
+
+    # Recording Export (read-only: just check properties of first recording)
+    if "recording-export" in supported_apis and "recording" in supported_apis:
+        print("\n--- recording export_properties (first recording) ---")
+        try:
+            recs = await storage.list_recordings(client, max_recordings=1)
+            real_recs = [r for r in recs if not r.get("_summary")]
+            if real_recs:
+                rec = real_recs[0]
+                props = await storage.get_export_properties(
+                    client,
+                    recording_id=rec["recordingid"],
+                    disk_id=rec["diskid"],
+                )
+                print(f"  Recording: {rec['recordingid']}")
+                for k, v in props.items():
+                    print(f"    {k}: {v}")
+                ok += 1
+            else:
+                print("  No recordings available for export test")
+                skip += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- recording export_properties --- SKIPPED (recording-export not supported)")
+        skip += 1
+
+    # Event Polling (WebSocket)
+    if "event-streaming-over-websocket" in supported_apis:
+        print("\n--- event polling (2s) ---")
+        try:
+            collected = await events.poll_events(client, duration_seconds=2.0)
+            print(f"  Collected {len(collected)} events in 2s")
+            for ev in collected[:3]:
+                print(f"    {ev.get('topic', '?')}: {ev.get('timestamp', '?')}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            fail += 1
+    else:
+        print("\n--- event polling --- SKIPPED (event-streaming-over-websocket not supported)")
         skip += 1
 
     await client.close()

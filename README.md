@@ -2,6 +2,8 @@
 
 A **Model Context Protocol (MCP)** server that wraps **Axis camera VAPIX APIs**, enabling AI assistants (Claude, etc.) to control and query Axis network cameras directly.
 
+> **Disclaimer**: This project is not affiliated with, endorsed by, or in any way officially connected to [Axis Communications AB](https://www.axis.com/). VAPIX is a registered trademark of Axis Communications AB.
+
 Built to run in **Docker** for easy deployment.
 
 > This is an independent hobby project and is not affiliated with, endorsed by, or sponsored by Axis Communications AB. VAPIX is a trademark of Axis Communications AB.
@@ -43,6 +45,19 @@ Built to run in **Docker** for easy deployment.
 | `list_privacy_masks` | List all privacy masks with coordinates | `/axis-cgi/privacymask.cgi` |
 | `add_privacy_mask` | Add a privacy mask (percent or pixel polygon) | `/axis-cgi/privacymask.cgi` |
 | `remove_privacy_mask` | Remove a privacy mask by name | `/axis-cgi/privacymask.cgi` |
+| `export_recording` | Download recording as .mkv file | `/axis-cgi/record/export/exportrecording.cgi` |
+| `get_time_info` | Get camera date/time, timezone, DST status | `/axis-cgi/time.cgi` |
+| `set_timezone` | Set camera timezone (IANA name) | `/axis-cgi/time.cgi` |
+| `get_daynight_config` | Get IR-cut filter day/night settings | `/axis-cgi/daynight.cgi` |
+| `set_daynight_config` | Configure day/night switching thresholds | `/axis-cgi/daynight.cgi` |
+| `list_stream_profiles` | List video stream profiles | `/axis-cgi/streamprofile.cgi` |
+| `create_stream_profile` | Create a stream profile (resolution, codec, FPS) | `/axis-cgi/streamprofile.cgi` |
+| `remove_stream_profile` | Remove a stream profile by name | `/axis-cgi/streamprofile.cgi` |
+| `get_geolocation` | Get camera GPS coordinates and heading | `/axis-cgi/geolocation/get.cgi` |
+| `set_geolocation` | Set camera GPS coordinates and heading | `/axis-cgi/geolocation/set.cgi` |
+| `get_audio_settings` | Get audio device settings (gain, mute, input) | `/axis-cgi/audiodevicecontrol.cgi` |
+| `set_audio_settings` | Update audio device settings | `/axis-cgi/audiodevicecontrol.cgi` |
+| `poll_events` | Collect camera events via WebSocket (1-30s poll) | `ws://device/vapix/ws-data-stream` |
 
 ## Quick Start (Docker)
 
@@ -210,3 +225,9 @@ pytest -v
 - [Basic Device Information](https://developer.axis.com/vapix/network-video/basic-device-information/)
 - [I/O Port Management](https://developer.axis.com/vapix/network-video/io-port-management/)
 - [Light Control](https://developer.axis.com/vapix/network-video/light-control/)
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+This project is not affiliated with Axis Communications AB. VAPIX is a trademark of Axis Communications AB.
