@@ -1,23 +1,36 @@
 """
 VAPIX Day/Night — Configure IR-cut filter switching for day/night transitions.
 
-Endpoint: POST /axis-cgi/daynight.cgi
-Docs: https://developer.axis.com/vapix/network-video/day-night/
+Primary endpoint: POST /axis-cgi/daynight.cgi (newer firmware)
+Fallback: GET /axis-cgi/param.cgi?group=ImageSource.I0.DayNight (legacy)
 
 Controls how the camera transitions between day mode (color) and night mode
 (IR/B&W). Configurable thresholds, dwell times, and IR-pass filter settings.
-
-Methods:
-    getCapabilities    — Check supported features per channel
-    getConfiguration   — Get current day/night settings
-    setConfiguration   — Update day/night settings
 """
 
 from typing import Any
 
-from .client import VapixClient
+import httpx
+
+from .client import VapixClient, VapixError
 
 _PATH = "/axis-cgi/daynight.cgi"
+_PARAM_PATH = "/axis-cgi/param.cgi"
+_PARAM_GROUP = "ImageSource.I0.DayNight"
+
+
+def _parse_param_response(text: str) -> dict[str, Any]:
+    """Parse param.cgi key=value response into a config dict."""
+    result: dict[str, Any] = {}
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        # e.g. root.ImageSource.I0.DayNight.IrCutFilter=auto
+        short_key = key.rsplit(".", 1)[-1]
+        result[short_key] = value
+    return result
 
 
 async def get_capabilities(client: VapixClient, channel: int = 0) -> dict[str, Any]:
@@ -34,29 +47,37 @@ async def get_capabilities(client: VapixClient, channel: int = 0) -> dict[str, A
         "method": "getCapabilities",
         "params": {"channel": channel},
     }
-    data = await client.post_json(_PATH, payload)
-    return data["data"]
+    try:
+        data = await client.post_json(_PATH, payload)
+        return data["data"]
+    except (httpx.HTTPStatusError, VapixError):
+        # Fallback: if param.cgi works, report basic capabilities
+        resp = await client.get(_PARAM_PATH, {"action": "list", "group": _PARAM_GROUP})
+        params = _parse_param_response(resp.text)
+        return {
+            "source": "param-cgi",
+            "IrCutFilter": params.get("IrCutFilter", "unknown"),
+            "ShiftLevel": params.get("ShiftLevel", "unknown"),
+        }
 
 
 async def get_configuration(client: VapixClient, channel: int = 0) -> dict[str, Any]:
     """
     Get current day/night configuration for a video channel.
 
-    Returns dict with:
-        DayNightShiftLevel  — Day→Night threshold (0-100)
-        DayNightDwellTime   — Seconds before switching day→night (1-600)
-        NightDayShiftLevel  — Night→Day threshold (0-100)
-        NightDayDwellTime   — Seconds before switching night→day (1-600)
-        Autotune            — Whether auto-tuning is enabled
-        NightFilter         — "irpass" or "clear"
+    Tries the modern daynight.cgi first, falls back to param.cgi.
     """
     payload = {
         "apiVersion": "1.2",
         "method": "getConfiguration",
         "params": {"channel": channel},
     }
-    data = await client.post_json(_PATH, payload)
-    return data["data"]
+    try:
+        data = await client.post_json(_PATH, payload)
+        return data["data"]
+    except (httpx.HTTPStatusError, VapixError):
+        resp = await client.get(_PARAM_PATH, {"action": "list", "group": _PARAM_GROUP})
+        return _parse_param_response(resp.text)
 
 
 async def set_configuration(
@@ -67,6 +88,8 @@ async def set_configuration(
     """
     Update day/night configuration.
 
+    Tries the modern daynight.cgi first, falls back to param.cgi.
+
     Args:
         channel: Video channel (default 0).
         **settings: Any combination of:
@@ -76,6 +99,8 @@ async def set_configuration(
             NightDayDwellTime (int 1-600)
             Autotune (bool)
             NightFilter ("irpass" or "clear")
+            IrCutFilter (str, param.cgi: "auto", "yes", "no")
+            ShiftLevel (int, param.cgi: 0-100)
     """
     params: dict[str, Any] = {"channel": channel}
     params.update(settings)
@@ -84,4 +109,11 @@ async def set_configuration(
         "method": "setConfiguration",
         "params": params,
     }
-    await client.post_json(_PATH, payload)
+    try:
+        await client.post_json(_PATH, payload)
+    except (httpx.HTTPStatusError, VapixError):
+        # Fallback: set via param.cgi
+        param_settings = {k: v for k, v in settings.items() if k != "channel"}
+        for key, val in param_settings.items():
+            param = f"{_PARAM_GROUP}.{key}"
+            await client.get(_PARAM_PATH, {"action": "update", param: str(val)})
