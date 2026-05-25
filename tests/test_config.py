@@ -197,3 +197,110 @@ cameras:
 
         with pytest.raises(ValueError, match="expected a 'cameras' key"):
             load_config(config_file)
+
+
+# ---------------------------------------------------------------------------
+# vapx config format support
+# ---------------------------------------------------------------------------
+
+class TestVapxConfigFormat:
+    def test_vapx_map_format_basic(self, tmp_path):
+        """vapx-style dict cameras should be converted to list format."""
+        yaml_content = """
+cameras:
+  west:
+    host: "192.168.1.10"
+    port: 8011
+    pass: "secret123"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert len(cfg.cameras) == 1
+        cam = cfg.cameras[0]
+        assert cam.id == "west"
+        assert cam.name == "west"
+        assert cam.host == "192.168.1.10"
+        assert cam.port == 8011
+        assert cam.password == "secret123"
+
+    def test_vapx_defaults_applied(self, tmp_path):
+        """defaults section should apply to all cameras."""
+        yaml_content = """
+defaults:
+  user: admin
+  https: false
+  verify_ssl: false
+
+cameras:
+  cam1:
+    host: "10.0.0.1"
+    pass: "pass1"
+  cam2:
+    host: "10.0.0.2"
+    pass: "pass2"
+    user: "operator"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert len(cfg.cameras) == 2
+
+        cam1 = cfg.get_camera("cam1")
+        assert cam1.username == "admin"
+        assert cam1.https is False
+
+        cam2 = cfg.get_camera("cam2")
+        assert cam2.username == "operator"  # camera-level overrides default
+
+    def test_vapx_format_with_capabilities(self, tmp_path):
+        """vapx format should pass through capabilities if specified."""
+        yaml_content = """
+cameras:
+  mycam:
+    host: "192.168.1.1"
+    pass: "x"
+    capabilities:
+      - snapshot
+      - ptz
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.cameras[0].capabilities == ["snapshot", "ptz"]
+
+    def test_vapx_no_capabilities_gets_default(self, tmp_path):
+        """vapx format without capabilities should get default ['snapshot']."""
+        yaml_content = """
+cameras:
+  nocaps:
+    host: "192.168.1.1"
+    pass: "x"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.cameras[0].capabilities == ["snapshot"]
+
+    def test_original_list_format_still_works(self, tmp_path):
+        """Original vpx-mcp list format should still work."""
+        yaml_content = """
+cameras:
+  - id: front
+    name: "Front Door"
+    host: "192.168.1.100"
+    password: "pass"
+    capabilities:
+      - snapshot
+      - ptz
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.cameras[0].id == "front"
+        assert cfg.cameras[0].capabilities == ["snapshot", "ptz"]

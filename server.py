@@ -1868,9 +1868,9 @@ async def main():
         ", ".join(f"{c.id} ({c.name})" for c in config.cameras),
     )
 
-    # Auto-detect capabilities for cameras with "auto" in capabilities
+    # Auto-detect capabilities for cameras with "auto" or no explicit capabilities
     for cam in config.cameras:
-        if "auto" in cam.capabilities:
+        if "auto" in cam.capabilities or cam.capabilities == ["snapshot"]:
             await _auto_detect_capabilities(cam)
 
     if args.transport == "stdio":

@@ -87,6 +87,60 @@ class AppConfig(BaseModel):
         return [cam.id for cam in self.cameras]
 
 
+def _convert_vapx_format(raw: dict) -> dict:
+    """Convert vapx map-style config to vpx-mcp list-style config.
+
+    vapx format:
+        defaults:
+          user: root
+          https: false
+        cameras:
+          west:
+            host: "192.168.1.10"
+            pass: "secret"
+
+    Becomes:
+        cameras:
+          - id: west
+            host: "192.168.1.10"
+            password: "secret"
+            username: "root"
+            https: false
+    """
+    defaults = raw.get("defaults", {})
+    cameras_dict = raw["cameras"]
+    cameras_list = []
+
+    for cam_id, cam_data in cameras_dict.items():
+        if not isinstance(cam_data, dict):
+            continue
+        entry: dict = {"id": cam_id}
+
+        # Apply defaults first, then camera-specific values override
+        for key, val in defaults.items():
+            if key == "user":
+                entry.setdefault("username", val)
+            elif key == "pass":
+                entry.setdefault("password", val)
+            else:
+                entry.setdefault(key, val)
+
+        for key, val in cam_data.items():
+            if key == "pass":
+                entry["password"] = val
+            elif key == "user":
+                entry["username"] = val
+            else:
+                entry[key] = val
+
+        # Default name from id if not specified
+        entry.setdefault("name", cam_id)
+
+        cameras_list.append(entry)
+
+    return {"cameras": cameras_list}
+
+
 def load_config(config_path: str | Path | None = None) -> AppConfig:
     """
     Load and validate camera configuration from a YAML file.
@@ -130,5 +184,10 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             f"Invalid config format in {resolved_path}: "
             "expected a 'cameras' key at the top level"
         )
+
+    # Support vapx map format: cameras is a dict keyed by camera id
+    cameras_raw = raw["cameras"]
+    if isinstance(cameras_raw, dict):
+        raw = _convert_vapx_format(raw)
 
     return AppConfig(**raw)

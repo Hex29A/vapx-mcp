@@ -201,9 +201,30 @@ cameras:
       - light
 ```
 
+### vapx format (also supported)
+
+If you use [vapx](https://github.com/Hex29A/vapx), vpx-mcp can read the same config file directly:
+
+```yaml
+defaults:
+  user: root
+  https: false
+  verify_ssl: false
+
+cameras:
+  front-door:
+    host: "192.168.1.100"
+    pass: "mypassword"
+  backyard:
+    host: "192.168.1.101"
+    pass: "otherpassword"
+```
+
+The camera key becomes the `id`, `pass` maps to `password`, `user` maps to `username`, and `defaults` apply to all cameras. When no `capabilities` are listed, they are **auto-discovered** from the camera at startup via VAPIX API Discovery.
+
 ### Capabilities
 
-Only declare capabilities your camera actually has. Use `auto` for auto-detection via API Discovery.
+Capabilities control which tools are available per camera. If omitted, capabilities are **auto-discovered** at startup. Use `auto` to force auto-detection even when some capabilities are listed manually.
 
 | Capability | Required for |
 |------------|-------------|
