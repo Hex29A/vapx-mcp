@@ -1886,7 +1886,7 @@ async def main():
         import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
-        from starlette.routing import Route
+        from starlette.routing import Mount, Route
 
         sse = SseServerTransport("/messages")
 
@@ -1900,13 +1900,10 @@ async def main():
                     app.create_initialization_options(),
                 )
 
-        async def handle_messages(request):
-            await sse.handle_post_message(request.scope, request.receive, request._send)
-
         starlette_app = Starlette(
             routes=[
                 Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=handle_messages, methods=["POST"]),
+                Mount("/messages", app=sse.handle_post_message),
             ],
         )
         uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
