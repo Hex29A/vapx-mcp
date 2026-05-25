@@ -112,7 +112,7 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "event-streaming-over-websocket": "events",
     "capture-mode": "capture_mode",
     "orientation": "orientation",
-    "ntp": "ntp",
+    "ntp": "time",
     "analytics-metadata-config": "analytics_metadata",
 }
 
@@ -1826,8 +1826,8 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "get_capture_modes": ("capture_mode", _h_get_capture_modes),
     "set_capture_mode": ("capture_mode", _h_set_capture_mode),
     "get_orientation": ("orientation", _h_get_orientation),
-    "get_ntp_status": ("ntp", _h_get_ntp_status),
-    "set_ntp_config": ("ntp", _h_set_ntp_config),
+    "get_ntp_status": ("time", _h_get_ntp_status),
+    "set_ntp_config": ("time", _h_set_ntp_config),
     "list_analytics_producers": ("analytics_metadata", _h_list_analytics_producers),
     "set_analytics_producers": ("analytics_metadata", _h_set_analytics_producers),
 }

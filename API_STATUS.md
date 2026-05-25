@@ -169,7 +169,7 @@ Checked items are implemented, tested, and available as MCP tools.
   - Tools: `get_ntp_status`, `set_ntp_config`
   - Read-write. Check NTP sync status and configure time servers.
   - Pros: Verify time synchronization. Fleet-wide NTP consistency checks.
-  - Cons: Configuration task. Requires `ntp` capability.
+  - Cons: Configuration task. Requires `time` capability.
 
 - [x] **Analytics Metadata Config** — `vapix/analytics_metadata.py`
   - Endpoint: `POST /axis-cgi/analyticsmetadataconfig.cgi`

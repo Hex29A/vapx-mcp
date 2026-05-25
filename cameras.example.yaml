@@ -7,7 +7,7 @@
 #   snapshot, ptz, io, light, overlay, vmd, guard_tour, siren,
 #   storage, clear_view, privacy_mask, time, daynight,
 #   stream_profiles, geolocation, audio, events,
-#   capture_mode, orientation, ntp, analytics_metadata
+#   capture_mode, orientation, analytics_metadata
 #
 # Use "auto" to auto-detect capabilities via the API Discovery endpoint.
 

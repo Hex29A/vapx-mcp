@@ -219,7 +219,7 @@ Only declare capabilities your camera actually has. Use `auto` for auto-detectio
 | `storage` | `get_disk_status`, `list_recordings`, `get_recording_info`, `export_recording` |
 | `clear_view` | `get_clear_view_info`, `start_clear_view`, `stop_clear_view` |
 | `privacy_mask` | `list_privacy_masks`, `add_privacy_mask`, `remove_privacy_mask` |
-| `time` | `get_time_info`, `set_timezone` |
+| `time` | `get_time_info`, `set_timezone`, `get_ntp_status`, `set_ntp_config` |
 | `daynight` | `get_daynight_config`, `set_daynight_config` |
 | `stream_profiles` | `list_stream_profiles`, `create_stream_profile`, `remove_stream_profile` |
 | `geolocation` | `get_geolocation`, `set_geolocation` |
@@ -227,7 +227,6 @@ Only declare capabilities your camera actually has. Use `auto` for auto-detectio
 | `events` | `poll_events` |
 | `capture_mode` | `get_capture_modes`, `set_capture_mode` |
 | `orientation` | `get_orientation` |
-| `ntp` | `get_ntp_status`, `set_ntp_config` |
 | `analytics_metadata` | `list_analytics_producers`, `set_analytics_producers` |
 
 `get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, and `status_all` work regardless of capabilities.

@@ -28,7 +28,7 @@ def _make_camera(**overrides):
         password="testpass",
         capabilities=[
             "snapshot", "ptz", "io", "light", "storage",
-            "capture_mode", "orientation", "ntp", "analytics_metadata",
+            "capture_mode", "orientation", "time", "analytics_metadata",
         ],
     )
     defaults.update(overrides)
@@ -327,5 +327,5 @@ class TestServerPhase3:
         assert _API_TO_CAPABILITY["io-port-management"] == "io"
         assert _API_TO_CAPABILITY["ptz-control"] == "ptz"
         assert _API_TO_CAPABILITY["capture-mode"] == "capture_mode"
-        assert _API_TO_CAPABILITY["ntp"] == "ntp"
+        assert _API_TO_CAPABILITY["ntp"] == "time"
         assert _API_TO_CAPABILITY["analytics-metadata-config"] == "analytics_metadata"
