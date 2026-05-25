@@ -62,6 +62,7 @@ from vapix import (
     imaging,
     io_ports,
     light,
+    mqtt,
     ntp,
     orientation,
     overlay,
@@ -70,6 +71,7 @@ from vapix import (
     siren,
     storage,
     stream_profiles,
+    stream_status,
     temperature,
     time_service,
     vmd,
@@ -116,6 +118,9 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "ntp": "time",
     "analytics-metadata-config": "analytics_metadata",
     "temperaturecontrol": "temperature",
+    "streamstatus": "stream_status",
+    "mqtt-client": "mqtt",
+    "event-mqtt-bridge": "mqtt",
 }
 
 
@@ -1283,6 +1288,79 @@ TOOLS = [
             "required": ["camera_id", "producers"],
         },
     ),
+    # --- Stream Status ---
+    Tool(
+        name="get_stream_status",
+        description=(
+            "Get real-time stream diagnostics for a camera — active client count, "
+            "bitrate (kbps), FPS, resolution, and codec for each stream. "
+            "Returns an empty list when no streams are active."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- MQTT ---
+    Tool(
+        name="get_mqtt_config",
+        description=(
+            "Get MQTT client configuration and connection status — broker address, "
+            "port, client ID, connection state, and event publication settings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="configure_mqtt",
+        description=(
+            "Configure the MQTT client connection on a camera. Once configured and enabled, "
+            "the camera publishes events directly to the broker — no MCP involvement at runtime."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "host": {"type": "string", "description": "MQTT broker hostname or IP"},
+                "port": {"type": "integer", "description": "Broker port (default 1883)", "default": 1883},
+                "protocol": {"type": "string", "description": "Protocol: tcp, ssl, ws, wss", "default": "tcp"},
+                "client_id": {"type": "string", "description": "Optional MQTT client ID"},
+                "username": {"type": "string", "description": "Optional broker username"},
+                "password": {"type": "string", "description": "Optional broker password"},
+            },
+            "required": ["camera_id", "host"],
+        },
+    ),
+    Tool(
+        name="enable_mqtt",
+        description="Enable (activate) the MQTT client on a camera — connects to the configured broker.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="disable_mqtt",
+        description="Disable (deactivate) the MQTT client on a camera — disconnects from the broker.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
     # --- Temperature ---
     Tool(
         name="get_temperature",
@@ -1797,6 +1875,39 @@ async def _h_get_temperature(cam, client, args):
     return _text_result(await temperature.get_sensor_list(client))
 
 
+async def _h_get_stream_status(cam, client, args):
+    return _text_result(await stream_status.get_stream_status(client))
+
+
+async def _h_get_mqtt_config(cam, client, args):
+    status = await mqtt.get_client_status(client)
+    events_cfg = await mqtt.get_event_publication_config(client)
+    return _text_result({"client": status, "eventPublication": events_cfg})
+
+
+async def _h_configure_mqtt(cam, client, args):
+    await mqtt.configure_client(
+        client,
+        host=args["host"],
+        port=args.get("port", 1883),
+        protocol=args.get("protocol", "tcp"),
+        client_id=args.get("client_id"),
+        username=args.get("username"),
+        password=args.get("password"),
+    )
+    return _text_result(f"Configured MQTT on {cam.name} → {args['host']}:{args.get('port', 1883)}")
+
+
+async def _h_enable_mqtt(cam, client, args):
+    await mqtt.activate_client(client)
+    return _text_result(f"MQTT enabled on {cam.name}")
+
+
+async def _h_disable_mqtt(cam, client, args):
+    await mqtt.deactivate_client(client)
+    return _text_result(f"MQTT disabled on {cam.name}")
+
+
 # Handler registry: tool_name → (required_capability_or_None, handler_function)
 _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "get_camera_info": (None, _h_get_camera_info),
@@ -1852,6 +1963,11 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "list_analytics_producers": ("analytics_metadata", _h_list_analytics_producers),
     "set_analytics_producers": ("analytics_metadata", _h_set_analytics_producers),
     "get_temperature": ("temperature", _h_get_temperature),
+    "get_stream_status": ("stream_status", _h_get_stream_status),
+    "get_mqtt_config": ("mqtt", _h_get_mqtt_config),
+    "configure_mqtt": ("mqtt", _h_configure_mqtt),
+    "enable_mqtt": ("mqtt", _h_enable_mqtt),
+    "disable_mqtt": ("mqtt", _h_disable_mqtt),
 }
 
 
