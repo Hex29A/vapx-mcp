@@ -96,7 +96,9 @@ config: AppConfig | None = None
 # Cache VapixClient instances per camera_id
 _clients: dict[str, VapixClient] = {}
 
-# Map VAPIX API discovery IDs to our capability names
+# Map VAPIX API discovery IDs to our capability names.
+# Note: param-cgi is the legacy parameter API; we map it to daynight since
+# day/night config is served via param.cgi and has no dedicated JSON API.
 _API_TO_CAPABILITY: dict[str, str] = {
     "io-port-management": "io",
     "light-control": "light",
@@ -121,6 +123,7 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "streamstatus": "stream_status",
     "mqtt-client": "mqtt",
     "event-mqtt-bridge": "mqtt",
+    "param-cgi": "daynight",
 }
 
 
