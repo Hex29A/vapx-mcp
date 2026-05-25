@@ -70,6 +70,7 @@ from vapix import (
     siren,
     storage,
     stream_profiles,
+    temperature,
     time_service,
     vmd,
 )
@@ -114,6 +115,7 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "orientation": "orientation",
     "ntp": "time",
     "analytics-metadata-config": "analytics_metadata",
+    "temperaturecontrol": "temperature",
 }
 
 
@@ -1281,6 +1283,21 @@ TOOLS = [
             "required": ["camera_id", "producers"],
         },
     ),
+    # --- Temperature ---
+    Tool(
+        name="get_temperature",
+        description=(
+            "Read temperature sensors (CPU, main board, lens, etc.) and heater status "
+            "from a camera. Returns readings in both Celsius and Fahrenheit."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
     # --- Multi-camera batch tools ---
     Tool(
         name="snapshot_all",
@@ -1776,6 +1793,10 @@ async def _h_set_analytics_producers(cam, client, args):
     return _text_result(f"Updated analytics producers on {cam.name}")
 
 
+async def _h_get_temperature(cam, client, args):
+    return _text_result(await temperature.get_sensor_list(client))
+
+
 # Handler registry: tool_name → (required_capability_or_None, handler_function)
 _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "get_camera_info": (None, _h_get_camera_info),
@@ -1830,6 +1851,7 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "set_ntp_config": ("time", _h_set_ntp_config),
     "list_analytics_producers": ("analytics_metadata", _h_list_analytics_producers),
     "set_analytics_producers": ("analytics_metadata", _h_set_analytics_producers),
+    "get_temperature": ("temperature", _h_get_temperature),
 }
 
 

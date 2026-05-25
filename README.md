@@ -168,7 +168,8 @@ python server.py --transport streamable-http --port 8080
 │   ├── capture_mode.py    # Capture mode (resolution/FPS)
 │   ├── orientation.py     # Physical orientation sensor
 │   ├── ntp.py             # NTP synchronization
-│   └── analytics_metadata.py # Analytics metadata producers
+│   ├── analytics_metadata.py # Analytics metadata producers
+│   └── temperature.py     # Temperature sensors & heaters
 ├── tests/                 # Unit & integration tests (mocked HTTP)
 ├── .github/workflows/ci.yml  # GitHub Actions CI
 ├── Dockerfile
@@ -249,6 +250,7 @@ Capabilities control which tools are available per camera. If omitted, capabilit
 | `capture_mode` | `get_capture_modes`, `set_capture_mode` |
 | `orientation` | `get_orientation` |
 | `analytics_metadata` | `list_analytics_producers`, `set_analytics_producers` |
+| `temperature` | `get_temperature` |
 
 `get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, and `status_all` work regardless of capabilities.
 

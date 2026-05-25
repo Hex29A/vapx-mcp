@@ -139,6 +139,27 @@ class VapixClient:
         response = await self.get(path, params)
         return response.content
 
+    async def post(
+        self, path: str, data: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """
+        POST form-encoded data to a VAPIX CGI endpoint.
+
+        Used for legacy CGIs (e.g. temperaturecontrol.cgi) that expect
+        application/x-www-form-urlencoded bodies.
+
+        Args:
+            path: CGI path.
+            data: Form fields.
+
+        Returns:
+            Raw httpx.Response.
+        """
+        logger.debug("POST (form) %s", path)
+        response = await self._client.post(path, data=data or {})
+        response.raise_for_status()
+        return response
+
     async def close(self):
         """Close the underlying HTTP client and release connections."""
         await self._client.aclose()

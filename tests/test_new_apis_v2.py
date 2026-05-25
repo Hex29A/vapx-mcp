@@ -568,4 +568,4 @@ class TestServerNewTools:
     async def test_tool_count_is_correct(self):
         """Should have 55 tools total (46 previous + 9 new phase 3)."""
         from server import TOOLS
-        assert len(TOOLS) == 55, f"Expected 55 tools, got {len(TOOLS)}"
+        assert len(TOOLS) == 56, f"Expected 56 tools, got {len(TOOLS)}"
