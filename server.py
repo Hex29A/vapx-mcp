@@ -159,6 +159,21 @@ async def _auto_detect_capabilities(camera: CameraConfig) -> None:
             cap = _API_TO_CAPABILITY.get(api_id)
             if cap:
                 discovered.add(cap)
+
+        # Legacy I/O probe: if modern discovery didn't report io-port-management,
+        # check param.cgi for IOPort entries (AXIS A9161, older firmware, etc.)
+        if "io" not in discovered:
+            try:
+                resp = await client.get(
+                    "/axis-cgi/param.cgi",
+                    {"action": "list", "group": "IOPort"},
+                )
+                if ".IOPort." in resp.text and ".Direction=" in resp.text:
+                    discovered.add("io")
+                    logger.info("Legacy I/O detected for %s via param.cgi", camera.id)
+            except Exception:
+                pass  # Device doesn't support param.cgi IOPort group
+
         # Merge: keep manual capabilities, add discovered ones
         manual = {c for c in camera.capabilities if c != "auto"}
         camera.capabilities = sorted(manual | discovered)

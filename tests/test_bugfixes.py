@@ -1,5 +1,5 @@
 """
-Tests for issues #8, #9, #10, #11, #12 bug fixes.
+Tests for issues #8, #9, #10, #11, #12, #13 bug fixes.
 """
 
 import os
@@ -9,6 +9,7 @@ import pytest
 import respx
 
 from config import CameraConfig
+from server import _auto_detect_capabilities, _clients
 from vapix import io_ports
 from vapix.client import VapixClient, VapixError
 
@@ -205,3 +206,106 @@ class TestIssue12LegacyIOFallback:
                 result = await io_ports.get_ports(client)
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #13 — Capability detection misses legacy I/O devices
+# ---------------------------------------------------------------------------
+
+class TestIssue13LegacyIOCapability:
+    @pytest.mark.asyncio
+    async def test_legacy_io_detected_via_param_cgi(self):
+        """When discovery API doesn't report io-port-management but param.cgi has IOPort data."""
+        cam = _make_camera(
+            id="a9161", https=False, port=80,
+            capabilities=["auto"],
+        )
+        base = "http://192.168.1.100:80"
+        discovery_resp = {
+            "apiVersion": "1.0",
+            "data": {
+                "apiList": [
+                    {"id": "param-cgi", "version": "1.0"},
+                ]
+            },
+        }
+        param_response = (
+            "root.IOPort.I0.Direction=input\n"
+            "root.IOPort.I0.Usage=Button\n"
+            "root.IOPort.O0.Direction=output\n"
+            "root.IOPort.O0.Usage=Relay\n"
+        )
+        with respx.mock:
+            respx.post(f"{base}/axis-cgi/apidiscovery.cgi").mock(
+                return_value=httpx.Response(200, json=discovery_resp)
+            )
+            respx.get(f"{base}/axis-cgi/param.cgi").mock(
+                return_value=httpx.Response(200, text=param_response)
+            )
+            _clients["a9161"] = VapixClient(cam)
+            try:
+                await _auto_detect_capabilities(cam)
+            finally:
+                await _clients.pop("a9161").close()
+
+        assert "io" in cam.capabilities
+
+    @pytest.mark.asyncio
+    async def test_no_legacy_io_when_param_cgi_empty(self):
+        """When discovery API and param.cgi both lack IO data, io should not be added."""
+        cam = _make_camera(
+            id="nocam", https=False, port=80,
+            capabilities=["auto"],
+        )
+        base = "http://192.168.1.100:80"
+        discovery_resp = {
+            "apiVersion": "1.0",
+            "data": {
+                "apiList": [
+                    {"id": "param-cgi", "version": "1.0"},
+                ]
+            },
+        }
+        with respx.mock:
+            respx.post(f"{base}/axis-cgi/apidiscovery.cgi").mock(
+                return_value=httpx.Response(200, json=discovery_resp)
+            )
+            respx.get(f"{base}/axis-cgi/param.cgi").mock(
+                return_value=httpx.Response(200, text="# Empty\n")
+            )
+            _clients["nocam"] = VapixClient(cam)
+            try:
+                await _auto_detect_capabilities(cam)
+            finally:
+                await _clients.pop("nocam").close()
+
+        assert "io" not in cam.capabilities
+
+    @pytest.mark.asyncio
+    async def test_modern_io_skips_legacy_probe(self):
+        """When discovery reports io-port-management, no legacy probe needed."""
+        cam = _make_camera(
+            id="modern", https=False, port=80,
+            capabilities=["auto"],
+        )
+        base = "http://192.168.1.100:80"
+        discovery_resp = {
+            "apiVersion": "1.0",
+            "data": {
+                "apiList": [
+                    {"id": "io-port-management", "version": "1.0"},
+                ]
+            },
+        }
+        with respx.mock:
+            respx.post(f"{base}/axis-cgi/apidiscovery.cgi").mock(
+                return_value=httpx.Response(200, json=discovery_resp)
+            )
+            # No param.cgi mock — should not be called
+            _clients["modern"] = VapixClient(cam)
+            try:
+                await _auto_detect_capabilities(cam)
+            finally:
+                await _clients.pop("modern").close()
+
+        assert "io" in cam.capabilities
