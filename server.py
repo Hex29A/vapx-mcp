@@ -151,45 +151,45 @@ async def _auto_detect_capabilities(camera: CameraConfig) -> None:
     merged with any explicitly listed ones (manual entries take precedence).
     """
     client = _get_client(camera)
+    discovered = {"snapshot"}  # snapshot is always available
+
+    # Modern API discovery (Artpec-7+). May 404 on older firmware — that's OK.
     try:
         apis = await discovery.get_api_list(client)
-        discovered = {"snapshot"}  # snapshot is always available
         for api_info in apis:
             api_id = api_info.get("id", "")
             cap = _API_TO_CAPABILITY.get(api_id)
             if cap:
                 discovered.add(cap)
-
-        # Legacy I/O probe: if modern discovery didn't report io-port-management,
-        # check param.cgi for IOPort entries (AXIS A9161, older firmware, etc.)
-        if "io" not in discovered:
-            try:
-                resp = await client.get(
-                    "/axis-cgi/param.cgi",
-                    {"action": "list", "group": "IOPort"},
-                )
-                if ".IOPort." in resp.text and ".Direction=" in resp.text:
-                    discovered.add("io")
-                    logger.info("Legacy I/O detected for %s via param.cgi", camera.id)
-            except Exception:
-                pass  # Device doesn't support param.cgi IOPort group
-
-        # Merge: keep manual capabilities, add discovered ones
-        manual = {c for c in camera.capabilities if c != "auto"}
-        camera.capabilities = sorted(manual | discovered)
-        logger.info(
-            "Auto-detected capabilities for %s: %s",
-            camera.id,
-            camera.capabilities,
-        )
     except Exception as e:
-        logger.warning(
-            "Auto-detection failed for %s: %s — using manual capabilities",
+        logger.debug(
+            "API discovery unavailable for %s: %s — probing legacy endpoints",
             camera.id, e,
         )
-        camera.capabilities = [c for c in camera.capabilities if c != "auto"]
-        if not camera.capabilities:
-            camera.capabilities = ["snapshot"]
+
+    # Legacy I/O probe: runs regardless of whether discovery succeeded.
+    # Needed for devices like AXIS A9161 (Artpec-5) where apidiscovery.cgi
+    # returns 404 but param.cgi reports IOPort configuration.
+    if "io" not in discovered:
+        try:
+            resp = await client.get(
+                "/axis-cgi/param.cgi",
+                {"action": "list", "group": "IOPort"},
+            )
+            if ".IOPort." in resp.text and ".Direction=" in resp.text:
+                discovered.add("io")
+                logger.info("Legacy I/O detected for %s via param.cgi", camera.id)
+        except Exception:
+            pass  # Device doesn't support param.cgi IOPort group
+
+    # Merge: keep manual capabilities, add discovered ones
+    manual = {c for c in camera.capabilities if c != "auto"}
+    camera.capabilities = sorted(manual | discovered)
+    logger.info(
+        "Auto-detected capabilities for %s: %s",
+        camera.id,
+        camera.capabilities,
+    )
 
 
 def _resolve_camera(camera_id: str) -> tuple[CameraConfig, VapixClient]:
