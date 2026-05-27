@@ -34,6 +34,7 @@ import argparse
 import base64
 import json
 import logging
+import os
 import sys
 from typing import Any
 
@@ -1744,9 +1745,10 @@ async def _h_get_recording_info(cam, client, args):
 
 async def _h_export_recording(cam, client, args):
     filename = args.get("filename") or f"{args['recording_id']}.mkv"
+    exports_dir = os.environ.get("VAPIX_EXPORTS_DIR", "/exports")
     return _text_result(await storage.export_recording(
         client, recording_id=args["recording_id"], disk_id=args["disk_id"],
-        output_path=f"/exports/{filename}",
+        output_path=f"{exports_dir}/{filename}",
         start_time=args.get("start_time"), stop_time=args.get("stop_time"),
     ))
 

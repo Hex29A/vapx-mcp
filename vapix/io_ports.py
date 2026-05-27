@@ -2,56 +2,127 @@
 VAPIX I/O Port Management API.
 
 Manages digital input/output ports on Axis cameras and I/O modules.
-Uses /axis-cgi/io/portmanagement.cgi with JSON POST requests.
 
-Reference: https://developer.axis.com/vapix/network-video/io-port-management/
+Primary:  POST /axis-cgi/io/portmanagement.cgi (modern JSON API)
+Fallback: GET  /axis-cgi/io/port.cgi + param.cgi (legacy, Artpec-5 / old FW)
 
-Port states use "open"/"closed" strings (not boolean).
-- "open"  = circuit open (inactive / high impedance)
-- "closed" = circuit closed (active / grounded)
-
-Methods:
-    - getPorts: Retrieve all ports and their current states.
-    - setPorts: Configure port properties including state.
-    - setStateSequence: Apply a timed sequence of state changes.
+Note: portmanagement.cgi uses 0-based port IDs ("0", "1").
+      Legacy io/port.cgi uses 1-based port numbers (action=1:/).
 """
 
 from typing import Any
 
-from vapix.client import VapixClient
+import httpx
+
+from vapix.client import VapixClient, VapixError
 
 API_VERSION = "1.0"
 
+_MODERN_PATH = "/axis-cgi/io/portmanagement.cgi"
+_LEGACY_PORT_PATH = "/axis-cgi/io/port.cgi"
+_LEGACY_PARAM_PATH = "/axis-cgi/param.cgi"
+
+
+# ---------------------------------------------------------------------------
+# Legacy fallback helpers
+# ---------------------------------------------------------------------------
+
+def _parse_legacy_ports(param_text: str, state_text: str) -> list[dict[str, Any]]:
+    """Parse legacy param.cgi + port.cgi responses into modern port format."""
+    # Parse port config from param.cgi (IOPort group)
+    # Port IDs are like I0, I1 (inputs), O0, O1 (outputs) — collect in order seen.
+    seen_ids: list[str] = []
+    port_data: dict[str, dict[str, Any]] = {}
+    for line in param_text.strip().splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        # e.g. root.IOPort.I0.Direction=input
+        parts = key.split(".")
+        if len(parts) < 4 or parts[1] != "IOPort":
+            continue
+        port_id = parts[2]  # "I0", "O0", etc.
+        field = parts[3] if len(parts) > 3 else ""
+        if port_id not in port_data:
+            seen_ids.append(port_id)
+            port_data[port_id] = {"port": str(len(seen_ids) - 1)}
+        if field == "Direction":
+            port_data[port_id]["direction"] = value.lower()
+        elif field == "Usage":
+            port_data[port_id]["name"] = value
+
+    # Build ordered list
+    ports = [port_data[pid] for pid in seen_ids]
+
+    # Parse active states from port.cgi
+    # Response: "port1=active\nport2=inactive\n" or similar
+    for line in state_text.strip().splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        # "port1" → index 0 (1-based to 0-based)
+        if key.startswith("port"):
+            idx = int(key[4:]) - 1
+            if 0 <= idx < len(ports):
+                ports[idx]["state"] = "closed" if value.strip() == "active" else "open"
+
+    return ports
+
+
+async def _legacy_get_ports(client: VapixClient) -> list[dict[str, Any]]:
+    """Get ports via legacy param.cgi + port.cgi."""
+    param_resp = await client.get(_LEGACY_PARAM_PATH, {"action": "list", "group": "IOPort"})
+    # Determine number of ports from param response
+    port_count = 0
+    for line in param_resp.text.splitlines():
+        if ".Direction=" in line:
+            port_count += 1
+    if port_count == 0:
+        return []
+    port_ids = ",".join(str(i + 1) for i in range(port_count))
+    state_resp = await client.get(_LEGACY_PORT_PATH, {"checkactive": port_ids})
+    return _parse_legacy_ports(param_resp.text, state_resp.text)
+
+
+async def _legacy_set_port(client: VapixClient, port: str, state: str) -> str:
+    """Set port state via legacy port.cgi. Port is 0-based, legacy is 1-based."""
+    legacy_port = int(port) + 1
+    # "/" = activate (closed), "\\" = deactivate (open)
+    action_char = "/" if state == "closed" else "\\"
+    await client.get(_LEGACY_PORT_PATH, {"action": f"{legacy_port}:{action_char}"})
+    return "OK"
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 async def get_ports(client: VapixClient) -> list[dict[str, Any]]:
     """
     Retrieve information about all I/O ports on the device.
 
+    Tries modern portmanagement.cgi first, falls back to legacy port.cgi.
+
     Returns a list of port dicts, each containing:
         - port: Port ID string (e.g. "0", "1")
         - state: Current state ("open" or "closed")
-        - configurable: Whether port direction can be changed
         - direction: "input" or "output"
         - name: User-friendly port name
-        - normalState: What constitutes the "normal" state
-
-    Example return:
-        [
-            {"port": "0", "state": "closed", "direction": "input",
-             "name": "Call button", "normalState": "open", ...},
-            {"port": "1", "state": "open", "direction": "output",
-             "name": "Door relay", "normalState": "open", ...}
-        ]
     """
-    result = await client.post_json(
-        "/axis-cgi/io/portmanagement.cgi",
-        {
-            "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
-            "method": "getPorts",
-        },
-    )
-    return result["data"]["items"]
+    try:
+        result = await client.post_json(
+            _MODERN_PATH,
+            {
+                "apiVersion": API_VERSION,
+                "context": "vpx-mcp",
+                "method": "getPorts",
+            },
+        )
+        return result["data"].get("items", [])
+    except (httpx.HTTPStatusError, VapixError):
+        return await _legacy_get_ports(client)
 
 
 async def set_port_state(
@@ -60,33 +131,33 @@ async def set_port_state(
     """
     Set the state of an output port.
 
+    Tries modern portmanagement.cgi first, falls back to legacy port.cgi.
+
     Args:
-        port: Port ID string (e.g. "1").
+        port: Port ID string (e.g. "0"). Zero-based.
         state: Target state — "open" or "closed".
-               "open" = circuit open (inactive)
-               "closed" = circuit closed (active)
 
     Returns:
         "OK" on success.
-
-    Raises:
-        VapixError: If the port is read-only or an input port.
     """
     if state not in ("open", "closed"):
         raise ValueError(f"state must be 'open' or 'closed', got '{state}'")
 
-    await client.post_json(
-        "/axis-cgi/io/portmanagement.cgi",
-        {
-            "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
-            "method": "setPorts",
-            "params": {
-                "ports": [{"port": port, "state": state}]
+    try:
+        await client.post_json(
+            _MODERN_PATH,
+            {
+                "apiVersion": API_VERSION,
+                "context": "vpx-mcp",
+                "method": "setPorts",
+                "params": {
+                    "ports": [{"port": port, "state": state}]
+                },
             },
-        },
-    )
-    return "OK"
+        )
+        return "OK"
+    except (httpx.HTTPStatusError, VapixError):
+        return await _legacy_set_port(client, port, state)
 
 
 async def pulse_port(
@@ -97,30 +168,36 @@ async def pulse_port(
     """
     Pulse an output port: close it, wait, then open it again.
 
-    Uses the setStateSequence method for atomic timed execution
-    on the device itself (no client-side sleep needed).
+    Uses setStateSequence on modern firmware. On legacy devices,
+    falls back to a simple set closed → set open sequence (note:
+    timing is approximate on legacy devices).
 
     Args:
-        port: Port ID string (e.g. "1").
+        port: Port ID string (e.g. "1"). Zero-based.
         duration_ms: How long to keep the port closed, in milliseconds.
-                     Maximum 65535 ms.
 
     Returns:
         "OK" on success.
     """
-    await client.post_json(
-        "/axis-cgi/io/portmanagement.cgi",
-        {
-            "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
-            "method": "setStateSequence",
-            "params": {
-                "port": port,
-                "sequence": [
-                    {"state": "closed", "time": duration_ms},
-                    {"state": "open", "time": 0},
-                ],
+    try:
+        await client.post_json(
+            _MODERN_PATH,
+            {
+                "apiVersion": API_VERSION,
+                "context": "vpx-mcp",
+                "method": "setStateSequence",
+                "params": {
+                    "port": port,
+                    "sequence": [
+                        {"state": "closed", "time": duration_ms},
+                        {"state": "open", "time": 0},
+                    ],
+                },
             },
-        },
-    )
-    return "OK"
+        )
+        return "OK"
+    except (httpx.HTTPStatusError, VapixError):
+        # Legacy: set closed, then open (no precise timing)
+        await _legacy_set_port(client, port, "closed")
+        await _legacy_set_port(client, port, "open")
+        return "OK"

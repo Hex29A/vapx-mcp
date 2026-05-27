@@ -85,7 +85,24 @@ class VapixClient:
             json=payload,
             headers={"Content-Type": "application/json"},
         )
-        response.raise_for_status()
+
+        # Some cameras return HTTP 400 with a valid VAPIX JSON error body.
+        # Parse the JSON error before raising HTTPStatusError so callers
+        # can catch VapixError with the proper error code.
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            try:
+                data = response.json()
+                if "error" in data:
+                    err = data["error"]
+                    raise VapixError(
+                        code=err.get("code", -1),
+                        message=err.get("message", "Unknown VAPIX error"),
+                    )
+            except (ValueError, KeyError):
+                pass
+            raise
 
         data = response.json()
 

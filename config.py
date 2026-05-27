@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _substitute_env_vars(value: str) -> str:
@@ -36,7 +36,7 @@ class CameraConfig(BaseModel):
     id: str = Field(..., description="Unique identifier used in tool calls")
     name: str = Field(..., description="Human-readable name")
     host: str = Field(..., description="IP or hostname (no protocol prefix)")
-    port: int = Field(default=443, description="HTTP(S) port")
+    port: Optional[int] = Field(default=None, description="HTTP(S) port. Defaults to 443 (HTTPS) or 80 (HTTP).")
     https: bool = Field(default=True, description="Use HTTPS")
     verify_ssl: bool = Field(
         default=False, description="Verify SSL certificate (false for self-signed)"
@@ -47,6 +47,12 @@ class CameraConfig(BaseModel):
         default_factory=lambda: ["snapshot"],
         description="List of supported capabilities: snapshot, ptz, events, io, light",
     )
+
+    @model_validator(mode="after")
+    def set_default_port(self) -> "CameraConfig":
+        if self.port is None:
+            self.port = 443 if self.https else 80
+        return self
 
     @field_validator("password", mode="before")
     @classmethod

@@ -116,6 +116,7 @@ Add to your MCP client config (e.g. `~/.claude.json`):
         "run", "-i", "--rm",
         "--network=host",
         "-v", "/path/to/cameras.yaml:/app/cameras.yaml:ro",
+        "-v", "/path/to/exports:/exports",
         "--env-file", "/path/to/.env",
         "vpx-mcp"
       ]
@@ -125,6 +126,7 @@ Add to your MCP client config (e.g. `~/.claude.json`):
 ```
 
 > **`--network=host`** is required so the container can reach cameras on your local LAN.
+> **`-v .../exports:/exports`** is needed if you use `export_recording` — without it, exported files are lost when the container exits. Set `VAPIX_EXPORTS_DIR` env var to change the export path.
 
 ### 5. Alternative: SSE/HTTP mode
 
@@ -298,10 +300,11 @@ pytest -v
 
 1. **Digest vs Basic auth**: Auto-selected per Axis documentation (HTTP→Digest, HTTPS→Basic).
 2. **`activateLight`/`deactivateLight`**: The actual VAPIX methods — there is no `setLightState`.
-3. **I/O port states**: Use `"open"`/`"closed"` strings, not booleans (per VAPIX spec).
+3. **I/O port states**: Use `"open"`/`"closed"` strings, not booleans (per VAPIX spec). Legacy fallback for older firmware via `io/port.cgi`.
 4. **Connection pooling**: One `httpx.AsyncClient` per camera, reused across tool calls.
 5. **Docker stdio**: Uses `docker run -i` so MCP clients can communicate via stdin/stdout.
 6. **No `axis` PyPI package**: All VAPIX calls implemented directly for full control.
+7. **Legacy fallbacks**: `daynight` and `io_ports` modules try modern JSON APIs first, then fall back to `param.cgi` / legacy CGIs for older firmware.
 
 ## VAPIX API Reference
 
