@@ -351,14 +351,12 @@ class TestIOPortsAPI:
 
         await client.close()
 
-    def test_invalid_state_rejected(self):
+    @pytest.mark.asyncio
+    async def test_invalid_state_rejected(self):
         """Test that invalid port states are rejected locally."""
+        _camera, client = _make_client()
         with pytest.raises(ValueError, match="must be 'open' or 'closed'"):
-            import asyncio
-            _camera, client = _make_client()
-            asyncio.get_event_loop().run_until_complete(
-                io_ports.set_port_state(client, "1", "active")
-            )
+            await io_ports.set_port_state(client, "1", "active")
 
     @pytest.mark.asyncio
     async def test_pulse_port(self):
