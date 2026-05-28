@@ -35,6 +35,69 @@ from .client import VapixClient
 _PATH = "/axis-cgi/privacymask.cgi"
 
 
+def transform_display_to_sensor(
+    polygon: str,
+    rotation: int,
+    mirror: bool,
+    sensor_w: int,
+    sensor_h: int,
+    display_w: int,
+    display_h: int,
+) -> str:
+    """
+    Convert a polygon from display (screenshot) coordinates to sensor coordinates.
+
+    The camera applies rotation and optional mirroring before display.
+    This function applies the inverse transform to get back to raw sensor space.
+
+    Args:
+        polygon: "x1,y1:x2,y2:..." in display pixel coordinates
+        rotation: Degrees the camera rotates the image for display (0/90/180/270)
+        mirror: Whether the displayed image is horizontally mirrored
+        sensor_w/h: Camera max resolution (raw sensor size)
+        display_w/h: Resolution of the snapshot the coordinates were taken from
+
+    Returns:
+        Polygon string in sensor pixel coordinates.
+    """
+    # Parse points
+    points = []
+    for pt in polygon.split(":"):
+        x, y = pt.split(",")
+        points.append((int(x), int(y)))
+
+    # Scale from display resolution to sensor resolution
+    if rotation in (0, 180):
+        sx = sensor_w / display_w
+        sy = sensor_h / display_h
+    else:
+        # 90/270: display W/H map to sensor H/W
+        sx = sensor_h / display_w
+        sy = sensor_w / display_h
+
+    points = [(int(x * sx), int(y * sy)) for x, y in points]
+
+    # Apply inverse of the camera's display transform.
+    # If camera rotated by R to produce the display, we invert by applying (360-R).
+    if rotation == 180:
+        points = [(sensor_w - x, sensor_h - y) for x, y in points]
+    elif rotation == 90:
+        # Camera rotated 90° CW → inverse is 90° CCW
+        # CCW 90°: (x, y) → (y, sensor_w - x) in swapped sensor space
+        points = [(y, sensor_w - x) for x, y in points]
+    elif rotation == 270:
+        # Camera rotated 270° CW → inverse is 90° CW
+        # CW 90°: (x, y) → (sensor_h - y, x)
+        points = [(sensor_h - y, x) for x, y in points]
+    # rotation == 0: no change
+
+    # Mirror: if camera mirrors horizontally, undo it
+    if mirror:
+        points = [(sensor_w - x, y) for x, y in points]
+
+    return ":".join(f"{x},{y}" for x, y in points)
+
+
 async def list_masks(client: VapixClient) -> list[dict[str, Any]]:
     """
     List all privacy masks with their pixel coordinates.

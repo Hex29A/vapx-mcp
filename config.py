@@ -47,6 +47,18 @@ class CameraConfig(BaseModel):
         default_factory=lambda: ["snapshot"],
         description="List of supported capabilities: snapshot, ptz, events, io, light",
     )
+    mask_rotation: int = Field(
+        default=0,
+        description="Image rotation in degrees (0/90/180/270). Auto-detected at startup from orientation API.",
+    )
+    mask_mirror: bool = Field(
+        default=False,
+        description="Whether the image is horizontally mirrored. Auto-detected at startup.",
+    )
+    mask_transform: Optional[str] = Field(
+        default=None,
+        description="Override mask coordinate transform: 'rotate0', 'rotate90', 'rotate180', 'rotate270', 'mirror_x'. Overrides auto-detection.",
+    )
 
     @model_validator(mode="after")
     def set_default_port(self) -> "CameraConfig":

@@ -191,6 +191,39 @@ async def _auto_detect_capabilities(camera: CameraConfig) -> None:
         except Exception:
             pass  # Device doesn't support param.cgi IOPort group
 
+    # Mask coordinate transform detection.
+    # Cameras auto-rotate the displayed image based on physical mounting.
+    # Privacy masks use raw sensor coords, so we need to know the effective rotation.
+    if camera.mask_transform is None:
+        try:
+            r = await client.get(
+                "/axis-cgi/param.cgi",
+                {"action": "list", "group": "Image.I0.Appearance"},
+            )
+            params: dict[str, str] = {}
+            for line in r.text.splitlines():
+                if "=" in line:
+                    _, _, val = line.rpartition("=")
+                    key = line.split("=")[0].split(".")[-1]
+                    params[key] = val.strip()
+
+            if params.get("AutoRotationEnabled", "no").lower() == "yes":
+                # Physical mount determines effective rotation — read from accelerometer.
+                orient = await orientation.get_orientation(client)
+                angle = orient.get("longitudinal", 0) or 0
+                # Round to nearest 90°
+                camera.mask_rotation = int(round(angle / 90) * 90) % 360
+            else:
+                camera.mask_rotation = int(params.get("Rotation", 0) or 0)
+
+            camera.mask_mirror = params.get("MirrorEnabled", "no").lower() == "yes"
+            logger.info(
+                "Mask transform for %s: rotation=%d°, mirror=%s",
+                camera.id, camera.mask_rotation, camera.mask_mirror,
+            )
+        except Exception as e:
+            logger.debug("Could not detect mask transform for %s: %s", camera.id, e)
+
     # Applications probe: try list.cgi — works on any camera with ACAP support.
     if "applications" not in discovered:
         try:
@@ -835,8 +868,9 @@ TOOLS = [
         name="add_privacy_mask",
         description=(
             "Add a privacy mask to cover a sensitive area in the video. "
-            "Specify position as width/height in percent (with optional center), "
-            "or as a pixel polygon. Masks adapt to PTZ changes."
+            "Provide polygon coordinates as they appear in the snapshot image — "
+            "the server automatically converts to sensor coordinates using the "
+            "camera's detected rotation/orientation. Masks adapt to PTZ changes."
         ),
         inputSchema={
             "type": "object",
@@ -846,28 +880,26 @@ TOOLS = [
                     "type": "string",
                     "description": "Unique mask name (max 128 chars)",
                 },
-                "width": {
-                    "type": "number",
-                    "description": "Mask width as percent of image width (0.0–100.0)",
-                },
-                "height": {
-                    "type": "number",
-                    "description": "Mask height as percent of image height (0.0–100.0)",
-                },
-                "center_x": {
-                    "type": "number",
-                    "description": "Center X position as percent of image width (default: center)",
-                },
-                "center_y": {
-                    "type": "number",
-                    "description": "Center Y position as percent of image height (default: center)",
-                },
                 "polygon": {
                     "type": "string",
-                    "description": 'Pixel polygon "x1,y1:x2,y2:x3,y3" in max resolution (alternative to width/height)',
+                    "description": (
+                        'Pixel polygon "x1,y1:x2,y2:x3,y3:x4,y4" as seen in the snapshot image '
+                        '(top-left origin). Use get_snapshot to identify coordinates visually. '
+                        'Minimum 3 points, recommend 4 for rectangles.'
+                    ),
+                },
+                "display_width": {
+                    "type": "integer",
+                    "description": "Width of the snapshot used to identify coordinates (default: 1920)",
+                    "default": 1920,
+                },
+                "display_height": {
+                    "type": "integer",
+                    "description": "Height of the snapshot used to identify coordinates (default: 1080)",
+                    "default": 1080,
                 },
             },
-            "required": ["camera_id", "name"],
+            "required": ["camera_id", "name", "polygon"],
         },
     ),
     Tool(
@@ -2028,11 +2060,35 @@ async def _h_list_privacy_masks(cam, client, args):
 
 
 async def _h_add_privacy_mask(cam, client, args):
-    await privacy_mask.add_mask(
-        client, name=args["name"], width=args.get("width"), height=args.get("height"),
-        center_x=args.get("center_x"), center_y=args.get("center_y"), polygon=args.get("polygon"),
-    )
-    return _text_result(f"Added privacy mask '{args['name']}' on {cam.name}")
+    raw_polygon = args.get("polygon")
+    sensor_polygon = raw_polygon
+
+    if raw_polygon and (cam.mask_rotation != 0 or cam.mask_mirror):
+        # Determine sensor (max) resolution via basicdeviceinfo/param.cgi.
+        # Fall back to 1920x1080 if not available.
+        try:
+            r = await client.get(
+                "/axis-cgi/param.cgi",
+                {"action": "list", "group": "Image.I0.Appearance.Resolution"},
+            )
+            res = r.text.split("=")[-1].strip()
+            sw, sh = (int(v) for v in res.split("x"))
+        except Exception:
+            sw, sh = 1920, 1080
+
+        dw = args.get("display_width", 1920)
+        dh = args.get("display_height", 1080)
+        sensor_polygon = privacy_mask.transform_display_to_sensor(
+            raw_polygon, cam.mask_rotation, cam.mask_mirror, sw, sh, dw, dh,
+        )
+        logger.info(
+            "Mask transform on %s (rot=%d, mirror=%s): %s → %s",
+            cam.id, cam.mask_rotation, cam.mask_mirror, raw_polygon, sensor_polygon,
+        )
+
+    await privacy_mask.add_mask(client, name=args["name"], polygon=sensor_polygon)
+    rotation_note = f" (auto-corrected for {cam.mask_rotation}° rotation)" if cam.mask_rotation else ""
+    return _text_result(f"Added privacy mask '{args['name']}' on {cam.name}{rotation_note}")
 
 
 async def _h_remove_privacy_mask(cam, client, args):
@@ -2354,10 +2410,24 @@ async def main():
         ", ".join(f"{c.id} ({c.name})" for c in config.cameras),
     )
 
-    # Auto-detect capabilities for cameras with "auto" or no explicit capabilities
-    for cam in config.cameras:
-        if "auto" in cam.capabilities or cam.capabilities == ["snapshot"]:
-            await _auto_detect_capabilities(cam)
+    # Auto-detect capabilities in parallel — all cameras probed concurrently.
+    # This keeps startup fast even with 50-100 cameras.
+    cams_to_detect = [
+        cam for cam in config.cameras
+        if "auto" in cam.capabilities or cam.capabilities == ["snapshot"]
+    ]
+    if cams_to_detect:
+        import asyncio as _asyncio
+
+        async def _detect_with_timeout(cam):
+            try:
+                await _asyncio.wait_for(_auto_detect_capabilities(cam), timeout=8.0)
+            except _asyncio.TimeoutError:
+                logger.warning("Capability detection timed out for %s — using defaults", cam.id)
+            except Exception as e:
+                logger.warning("Capability detection failed for %s: %s", cam.id, e)
+
+        await _asyncio.gather(*(_detect_with_timeout(cam) for cam in cams_to_detect))
 
     if args.transport == "stdio":
         from mcp.server.stdio import stdio_server
