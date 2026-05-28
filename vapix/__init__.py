@@ -1,1 +1,1 @@
-# VPX MCP Server — Python package marker
+# VAPX MCP Server — Python package marker

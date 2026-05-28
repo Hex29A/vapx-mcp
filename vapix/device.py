@@ -40,7 +40,7 @@ async def get_all_properties(client: VapixClient) -> dict[str, Any]:
         "/axis-cgi/basicdeviceinfo.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "getAllProperties",
         },
     )
@@ -63,7 +63,7 @@ async def get_properties(
         "/axis-cgi/basicdeviceinfo.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "getProperties",
             "params": {"propertyList": properties},
         },

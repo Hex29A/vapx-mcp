@@ -1,21 +1,21 @@
-# VPX MCP Server — Docker Compose
+# VAPX MCP Server — Docker Compose
 #
 # Usage:
 #   docker compose build           # Build the image
-#   docker compose up vpx-sse    # Run in SSE/HTTP mode (port 8080)
+#   docker compose up vapx-sse   # Run in SSE/HTTP mode (port 8080)
 #
 # For stdio mode (MCP client integration), use docker run directly:
 #   docker run -i --rm --network=host \
 #     -v ./cameras.yaml:/app/cameras.yaml:ro \
 #     --env-file .env \
-#     vpx-mcp
+#     vapx-mcp
 
 services:
   # SSE/HTTP transport — long-running server accessible via HTTP
-  vpx-sse:
+  vapx-sse:
     build: .
-    image: vpx-mcp
-    container_name: vpx-mcp-sse
+    image: vapx-mcp
+    container_name: vapx-mcp-sse
     command: ["--transport", "sse", "--port", "8080"]
     ports:
       - "8080:8080"

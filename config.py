@@ -1,5 +1,5 @@
 """
-VPX MCP Server — Configuration loading and validation.
+VAPX MCP Server — Configuration loading and validation.
 
 Loads camera definitions from cameras.yaml, substitutes environment variables
 in password fields (${ENV_VAR} syntax), and validates with Pydantic.
@@ -94,7 +94,7 @@ class AppConfig(BaseModel):
 
 
 def _convert_vapx_format(raw: dict) -> dict:
-    """Convert vapx map-style config to vpx-mcp list-style config.
+    """Convert vapx map-style config to vapx-mcp list-style config.
 
     vapx format:
         defaults:

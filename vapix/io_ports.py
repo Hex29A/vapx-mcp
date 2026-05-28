@@ -116,7 +116,7 @@ async def get_ports(client: VapixClient) -> list[dict[str, Any]]:
             _MODERN_PATH,
             {
                 "apiVersion": API_VERSION,
-                "context": "vpx-mcp",
+                "context": "vapx-mcp",
                 "method": "getPorts",
             },
         )
@@ -148,7 +148,7 @@ async def set_port_state(
             _MODERN_PATH,
             {
                 "apiVersion": API_VERSION,
-                "context": "vpx-mcp",
+                "context": "vapx-mcp",
                 "method": "setPorts",
                 "params": {
                     "ports": [{"port": port, "state": state}]
@@ -184,7 +184,7 @@ async def pulse_port(
             _MODERN_PATH,
             {
                 "apiVersion": API_VERSION,
-                "context": "vpx-mcp",
+                "context": "vapx-mcp",
                 "method": "setStateSequence",
                 "params": {
                     "port": port,

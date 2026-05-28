@@ -1,5 +1,5 @@
 """
-VPX MCP Server — Main entry point.
+VAPX MCP Server — Main entry point.
 
 A Model Context Protocol (MCP) server that exposes Axis camera VAPIX APIs
 as tools for AI assistants. Runs over stdio transport by default, with
@@ -28,6 +28,10 @@ Tools provided:
     - set_io_port: Set an output port state (open/closed)
     - get_lights: List all lights and their states
     - toggle_light: Turn a camera light on or off
+    - reboot_camera: Reboot a camera (returns immediately; camera offline ~30-60s)
+    - get_system_log: Read the camera system log (last N lines or full)
+    - get_audit_log: Read the security audit log (logins, config changes)
+    - check_systemready: Check if a camera is ready to handle requests
 """
 
 import argparse
@@ -73,6 +77,7 @@ from vapix import (
     storage,
     stream_profiles,
     stream_status,
+    system,
     temperature,
     time_service,
     vmd,
@@ -87,12 +92,12 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     stream=sys.stderr,  # MCP uses stdout for protocol; logs go to stderr
 )
-logger = logging.getLogger("vpx-mcp")
+logger = logging.getLogger("vapx-mcp")
 
 # ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
-app = Server("vpx-mcp")
+app = Server("vapx-mcp")
 config: AppConfig | None = None
 # Cache VapixClient instances per camera_id
 _clients: dict[str, VapixClient] = {}
@@ -1424,6 +1429,77 @@ TOOLS = [
             "properties": {},
         },
     ),
+    # --- System ---
+    Tool(
+        name="reboot_camera",
+        description=(
+            "Reboot an Axis camera. The camera will be unreachable for ~30-60 seconds. "
+            "Uses firmwaremanagement.cgi (fw 7.40+) with fallback to legacy restart.cgi."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="get_system_log",
+        description=(
+            "Read the system log from an Axis camera. "
+            "Useful for diagnostics and troubleshooting. "
+            "Optionally returns only the last N lines."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "lines": {
+                    "type": "integer",
+                    "description": "Return only the last N lines. Omit for the full log.",
+                    "minimum": 1,
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="get_audit_log",
+        description=(
+            "Read the security audit log from an Axis camera. "
+            "Shows login events, configuration changes, and other security-relevant actions."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="check_systemready",
+        description=(
+            "Check if an Axis camera is ready to handle requests. "
+            "Returns readiness status, uptime in seconds, and boot ID. "
+            "Useful for polling after a reboot."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "timeout": {
+                    "type": "integer",
+                    "description": "Max seconds to wait for readiness (default: 10)",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 60,
+                },
+            },
+            "required": ["camera_id"],
+        },
+    ),
 ]
 
 
@@ -1928,6 +2004,32 @@ async def _h_disable_mqtt(cam, client, args):
     return _text_result(f"MQTT disabled on {cam.name}")
 
 
+async def _h_reboot_camera(cam, client, args):
+    result = await system.reboot(client)
+    return _text_result({
+        **result,
+        "camera": cam.name,
+        "note": "Camera will be unreachable for ~30-60 seconds.",
+    })
+
+
+async def _h_get_system_log(cam, client, args):
+    lines = args.get("lines")
+    text = await system.get_system_log(client, lines=lines)
+    return _text_result(text)
+
+
+async def _h_get_audit_log(cam, client, args):
+    text = await system.get_audit_log(client)
+    return _text_result(text)
+
+
+async def _h_check_systemready(cam, client, args):
+    timeout = args.get("timeout", 10)
+    result = await system.check_systemready(client, timeout=timeout)
+    return _text_result(result)
+
+
 # Handler registry: tool_name → (required_capability_or_None, handler_function)
 _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "get_camera_info": (None, _h_get_camera_info),
@@ -1988,6 +2090,10 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "configure_mqtt": ("mqtt", _h_configure_mqtt),
     "enable_mqtt": ("mqtt", _h_enable_mqtt),
     "disable_mqtt": ("mqtt", _h_disable_mqtt),
+    "reboot_camera": (None, _h_reboot_camera),
+    "get_system_log": (None, _h_get_system_log),
+    "get_audit_log": (None, _h_get_audit_log),
+    "check_systemready": (None, _h_check_systemready),
 }
 
 
@@ -1995,8 +2101,8 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
 # Main entry point
 # ---------------------------------------------------------------------------
 async def main():
-    """Run the VPX MCP server."""
-    parser = argparse.ArgumentParser(description="VPX MCP Server")
+    """Run the VAPX MCP server."""
+    parser = argparse.ArgumentParser(description="VAPX MCP Server")
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],

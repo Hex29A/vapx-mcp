@@ -46,7 +46,7 @@ async def get_light_information(client: VapixClient) -> list[dict[str, Any]]:
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "getLightInformation",
             "params": {},
         },
@@ -74,7 +74,7 @@ async def activate_light(client: VapixClient, light_id: str) -> str:
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "activateLight",
             "params": {"lightID": light_id},
         },
@@ -96,7 +96,7 @@ async def deactivate_light(client: VapixClient, light_id: str) -> str:
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "deactivateLight",
             "params": {"lightID": light_id},
         },
@@ -120,7 +120,7 @@ async def enable_light(client: VapixClient, light_id: str) -> str:
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "enableLight",
             "params": {"lightID": light_id},
         },
@@ -142,7 +142,7 @@ async def get_light_status(client: VapixClient, light_id: str) -> bool:
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "getLightStatus",
             "params": {"lightID": light_id},
         },
@@ -169,7 +169,7 @@ async def set_manual_intensity(
         "/axis-cgi/lightcontrol.cgi",
         {
             "apiVersion": API_VERSION,
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "setManualIntensity",
             "params": {"lightID": light_id, "intensity": intensity},
         },

@@ -53,7 +53,7 @@ class TestDeviceAPI:
 
         mock_resp = {
             "apiVersion": "1.0",
-            "context": "vpx-mcp",
+            "context": "vapx-mcp",
             "method": "getAllProperties",
             "data": {
                 "propertyList": {

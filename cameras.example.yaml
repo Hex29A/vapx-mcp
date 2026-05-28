@@ -1,4 +1,4 @@
-# Example camera configuration for VPX MCP Server
+# Example camera configuration for VAPX MCP Server
 #
 # Copy this file to cameras.yaml and fill in your camera details.
 # Passwords can reference environment variables with ${ENV_VAR} syntax.

@@ -1,12 +1,10 @@
-# VPX MCP Server
+# VAPX MCP Server
 
 A **Model Context Protocol (MCP)** server that wraps **Axis camera VAPIX APIs**, enabling AI assistants (Claude, etc.) to control and query Axis network cameras directly.
 
 > **Disclaimer**: This project is not affiliated with, endorsed by, or in any way officially connected to [Axis Communications AB](https://www.axis.com/). VAPIX is a registered trademark of Axis Communications AB.
 
 Built to run in **Docker** for easy deployment.
-
-> This is an independent hobby project and is not affiliated with, endorsed by, or sponsored by Axis Communications AB. VAPIX is a trademark of Axis Communications AB.
 
 ## Features
 
@@ -65,10 +63,20 @@ Built to run in **Docker** for easy deployment.
 | `set_ntp_config` | Configure NTP client settings | `/axis-cgi/ntp.cgi` |
 | `list_analytics_producers` | List analytics metadata producers | `/axis-cgi/analyticsmetadataconfig.cgi` |
 | `set_analytics_producers` | Enable/disable analytics producers | `/axis-cgi/analyticsmetadataconfig.cgi` |
+| `get_temperature` | Read temperature sensors and heater status | `/axis-cgi/temperaturecontrol.cgi` |
+| `get_stream_status` | Real-time stream diagnostics | `/axis-cgi/streamstatus.cgi` |
+| `get_mqtt_config` | Get MQTT client configuration | `/axis-cgi/mqtt.cgi` |
+| `configure_mqtt` | Configure MQTT broker connection | `/axis-cgi/mqtt.cgi` |
+| `enable_mqtt` | Activate the MQTT client | `/axis-cgi/mqtt.cgi` |
+| `disable_mqtt` | Deactivate the MQTT client | `/axis-cgi/mqtt.cgi` |
+| `reboot_camera` | Reboot camera (offline ~30-60s after call) | `/axis-cgi/firmwaremanagement.cgi` |
+| `get_system_log` | Read system log, optionally last N lines | `/axis-cgi/admin/systemlog.cgi` |
+| `get_audit_log` | Read security audit log (logins, config changes) | `/axis-cgi/auditlog.cgi` |
+| `check_systemready` | Check if camera is ready to handle requests | `/axis-cgi/systemready.cgi` |
 | `snapshot_all` | Capture snapshots from all cameras at once | Multi-camera batch |
 | `status_all` | Get online/offline status of all cameras | Multi-camera batch |
 
-**55 tools** across 22 VAPIX API families.
+**65 tools** across 23 VAPIX API families.
 
 ## Additional Features
 
@@ -110,7 +118,7 @@ Add to your MCP client config (e.g. `~/.claude.json`):
 ```json
 {
   "mcpServers": {
-    "vpx": {
+    "vapx": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
@@ -118,7 +126,7 @@ Add to your MCP client config (e.g. `~/.claude.json`):
         "-v", "/path/to/cameras.yaml:/app/cameras.yaml:ro",
         "-v", "/path/to/exports:/exports",
         "--env-file", "/path/to/.env",
-        "vpx-mcp"
+        "vapx-mcp"
       ]
     }
   }
@@ -134,7 +142,7 @@ For web-based access or debugging:
 
 ```bash
 # SSE mode
-docker compose up vpx-sse
+docker compose up vapx-sse
 # Server available at http://localhost:8080/sse
 
 # Streamable HTTP mode (latest MCP transport)
@@ -173,7 +181,8 @@ python server.py --transport streamable-http --port 8080
 │   ├── analytics_metadata.py # Analytics metadata producers
 │   ├── temperature.py     # Temperature sensors & heaters
 │   ├── stream_status.py   # Real-time stream diagnostics
-│   └── mqtt.py            # MQTT client & event bridge config
+│   ├── mqtt.py            # MQTT client & event bridge config
+│   └── system.py          # Reboot, system log, audit log, systemready
 ├── tests/                 # Unit & integration tests (mocked HTTP)
 ├── .github/workflows/ci.yml  # GitHub Actions CI
 ├── Dockerfile
@@ -208,7 +217,7 @@ cameras:
 
 ### vapx format (also supported)
 
-If you use [vapx](https://github.com/Hex29A/vapx), vpx-mcp can read the same config file directly:
+If you use [vapx](https://github.com/Hex29A/vapx), vapx-mcp can read the same config file directly:
 
 ```yaml
 defaults:
@@ -258,7 +267,7 @@ Capabilities control which tools are available per camera. If omitted, capabilit
 | `stream_status` | `get_stream_status` |
 | `mqtt` | `get_mqtt_config`, `configure_mqtt`, `enable_mqtt`, `disable_mqtt` |
 
-`get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, and `status_all` work regardless of capabilities.
+`get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, `status_all`, `reboot_camera`, `get_system_log`, `get_audit_log`, and `check_systemready` work regardless of capabilities.
 
 ## Authentication
 
@@ -304,7 +313,7 @@ pytest -v
 4. **Connection pooling**: One `httpx.AsyncClient` per camera, reused across tool calls.
 5. **Docker stdio**: Uses `docker run -i` so MCP clients can communicate via stdin/stdout.
 6. **No `axis` PyPI package**: All VAPIX calls implemented directly for full control.
-7. **Legacy fallbacks**: `daynight` and `io_ports` modules try modern JSON APIs first, then fall back to `param.cgi` / legacy CGIs for older firmware.
+7. **Legacy fallbacks**: `daynight` and `io_ports` modules try modern JSON APIs first, then fall back to `param.cgi` / legacy CGIs for older firmware. `reboot_camera` falls back to `restart.cgi` on firmware < 7.40.
 
 ## VAPIX API Reference
 
@@ -313,6 +322,9 @@ pytest -v
 - [Basic Device Information](https://developer.axis.com/vapix/network-video/basic-device-information/)
 - [I/O Port Management](https://developer.axis.com/vapix/network-video/io-port-management/)
 - [Light Control](https://developer.axis.com/vapix/network-video/light-control/)
+- [Firmware Management](https://developer.axis.com/vapix/network-video/firmware-management-api/)
+- [Systemready](https://developer.axis.com/vapix/network-video/systemready-api/)
+- [Audit Log](https://developer.axis.com/vapix/network-video/audit-log/)
 
 ## License
 
