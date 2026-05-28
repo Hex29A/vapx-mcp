@@ -1468,12 +1468,18 @@ TOOLS = [
         name="get_audit_log",
         description=(
             "Read the security audit log from an Axis camera. "
-            "Shows login events, configuration changes, and other security-relevant actions."
+            "Shows login events, configuration changes, and other security-relevant actions. "
+            "Optionally returns only the last N lines."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "camera_id": {"type": "string", "description": "Camera identifier"},
+                "lines": {
+                    "type": "integer",
+                    "description": "Return only the last N lines. Omit for the full log.",
+                    "minimum": 1,
+                },
             },
             "required": ["camera_id"],
         },
@@ -2020,7 +2026,8 @@ async def _h_get_system_log(cam, client, args):
 
 
 async def _h_get_audit_log(cam, client, args):
-    text = await system.get_audit_log(client)
+    lines = args.get("lines")
+    text = await system.get_audit_log(client, lines=lines)
     return _text_result(text)
 
 

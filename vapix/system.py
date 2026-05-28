@@ -63,14 +63,21 @@ async def get_system_log(client: VapixClient, lines: int | None = None) -> str:
     return text
 
 
-async def get_audit_log(client: VapixClient) -> str:
+async def get_audit_log(client: VapixClient, lines: int | None = None) -> str:
     """
     Retrieve the audit log from auditlog.cgi.
+
+    Args:
+        lines: If set, return only the last N lines. Default: full log.
 
     Returns security audit events (logins, config changes) as plain text.
     """
     resp = await client.get(_AUDITLOG_PATH)
-    return resp.text
+    text = resp.text
+    if lines is not None and lines > 0:
+        all_lines = text.splitlines()
+        text = "\n".join(all_lines[-lines:])
+    return text
 
 
 async def check_systemready(client: VapixClient, timeout: int = 10) -> dict[str, Any]:

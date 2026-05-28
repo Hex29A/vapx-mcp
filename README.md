@@ -71,7 +71,7 @@ Built to run in **Docker** for easy deployment.
 | `disable_mqtt` | Deactivate the MQTT client | `/axis-cgi/mqtt.cgi` |
 | `reboot_camera` | Reboot camera (offline ~30-60s after call) | `/axis-cgi/firmwaremanagement.cgi` |
 | `get_system_log` | Read system log, optionally last N lines | `/axis-cgi/admin/systemlog.cgi` |
-| `get_audit_log` | Read security audit log (logins, config changes) | `/axis-cgi/auditlog.cgi` |
+| `get_audit_log` | Read security audit log (logins, config changes), optional last N lines | `/axis-cgi/auditlog.cgi` |
 | `check_systemready` | Check if camera is ready to handle requests | `/axis-cgi/systemready.cgi` |
 | `snapshot_all` | Capture snapshots from all cameras at once | Multi-camera batch |
 | `status_all` | Get online/offline status of all cameras | Multi-camera batch |
