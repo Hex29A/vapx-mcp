@@ -6,6 +6,19 @@ A **Model Context Protocol (MCP)** server that wraps **Axis camera VAPIX APIs**,
 
 Built to run in **Docker** for easy deployment.
 
+## Ecosystem
+
+This project is part of a two-tool ecosystem for Axis cameras. Both tools share the same `cameras.yaml` configuration file.
+
+| Tool | Role | Use when |
+|------|------|----------|
+| **vapx-mcp** (this project) | AI-driven daily operations | You want an AI assistant to observe, react, and adjust cameras |
+| **[vapx](https://github.com/Hex29A/vapx)** | CLI for administration | You need to set up, maintain, or batch-manage cameras |
+
+**vapx-mcp** is for: snapshots, PTZ, I/O, overlays, analytics, event monitoring, temperature, stream diagnostics, rebooting, log reading.
+
+**vapx** is for: firmware upgrades, network configuration, user management, ACAP installation, batch operations across many cameras, raw param.cgi access.
+
 ## Features
 
 | Tool | Description | VAPIX Endpoint |
@@ -69,6 +82,14 @@ Built to run in **Docker** for easy deployment.
 | `configure_mqtt` | Configure MQTT broker connection | `/axis-cgi/mqtt.cgi` |
 | `enable_mqtt` | Activate the MQTT client | `/axis-cgi/mqtt.cgi` |
 | `disable_mqtt` | Deactivate the MQTT client | `/axis-cgi/mqtt.cgi` |
+| `list_applications` | List installed ACAP apps with status, license, vendor, version | `/axis-cgi/applications/list.cgi` |
+| `start_application` | Start a stopped ACAP application | `/axis-cgi/applications/control.cgi` |
+| `stop_application` | Stop a running ACAP application | `/axis-cgi/applications/control.cgi` |
+| `restart_application` | Restart an ACAP application | `/axis-cgi/applications/control.cgi` |
+| `get_users` | List user accounts and group memberships (admin/operator/viewer/ptz) | `/axis-cgi/admin/pwdgrp.cgi` |
+| `list_view_areas` | List virtual view areas with geometry, canvas size, and grid constraints | `/axis-cgi/viewarea/info.cgi` |
+| `set_view_area_geometry` | Digitally reframe a view area (crop the sensor without moving the lens) | `/axis-cgi/viewarea/configure.cgi` |
+| `reset_view_area_geometry` | Reset a view area geometry to factory default (full canvas) | `/axis-cgi/viewarea/configure.cgi` |
 | `reboot_camera` | Reboot camera (offline ~30-60s after call) | `/axis-cgi/firmwaremanagement.cgi` |
 | `get_system_log` | Read system log, optionally last N lines | `/axis-cgi/admin/systemlog.cgi` |
 | `get_audit_log` | Read security audit log (logins, config changes), optional last N lines | `/axis-cgi/auditlog.cgi` |
@@ -76,7 +97,7 @@ Built to run in **Docker** for easy deployment.
 | `snapshot_all` | Capture snapshots from all cameras at once | Multi-camera batch |
 | `status_all` | Get online/offline status of all cameras | Multi-camera batch |
 
-**65 tools** across 23 VAPIX API families.
+**73 tools** across 26 VAPIX API families.
 
 ## Additional Features
 
@@ -182,7 +203,10 @@ python server.py --transport streamable-http --port 8080
 │   ├── temperature.py     # Temperature sensors & heaters
 │   ├── stream_status.py   # Real-time stream diagnostics
 │   ├── mqtt.py            # MQTT client & event bridge config
-│   └── system.py          # Reboot, system log, audit log, systemready
+│   ├── system.py          # Reboot, system log, audit log, systemready
+│   ├── applications.py    # ACAP application lifecycle (list, start, stop, restart)
+│   ├── users.py           # User and group listing
+│   └── view_area.py       # Virtual view area management (crop/reframe)
 ├── tests/                 # Unit & integration tests (mocked HTTP)
 ├── .github/workflows/ci.yml  # GitHub Actions CI
 ├── Dockerfile
@@ -266,8 +290,10 @@ Capabilities control which tools are available per camera. If omitted, capabilit
 | `temperature` | `get_temperature` |
 | `stream_status` | `get_stream_status` |
 | `mqtt` | `get_mqtt_config`, `configure_mqtt`, `enable_mqtt`, `disable_mqtt` |
+| `applications` | `list_applications`, `start_application`, `stop_application`, `restart_application` |
+| `view_area` | `list_view_areas`, `set_view_area_geometry`, `reset_view_area_geometry` |
 
-`get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, `status_all`, `reboot_camera`, `get_system_log`, `get_audit_log`, and `check_systemready` work regardless of capabilities.
+`get_camera_info`, `list_cameras`, `discover_apis`, `snapshot_all`, `status_all`, `get_users`, `reboot_camera`, `get_system_log`, `get_audit_log`, and `check_systemready` work regardless of capabilities.
 
 ## Authentication
 

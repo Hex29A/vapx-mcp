@@ -55,6 +55,7 @@ from mcp.types import (
 from config import AppConfig, CameraConfig, load_config
 from vapix import (
     analytics_metadata,
+    applications,
     audio,
     capture_mode,
     clear_view,
@@ -80,6 +81,8 @@ from vapix import (
     system,
     temperature,
     time_service,
+    users,
+    view_area,
     vmd,
 )
 from vapix.client import VapixClient, VapixError
@@ -130,6 +133,7 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "mqtt-client": "mqtt",
     "event-mqtt-bridge": "mqtt",
     "param-cgi": "daynight",
+    "view-area": "view_area",
 }
 
 
@@ -186,6 +190,16 @@ async def _auto_detect_capabilities(camera: CameraConfig) -> None:
                 logger.info("Legacy I/O detected for %s via param.cgi", camera.id)
         except Exception:
             pass  # Device doesn't support param.cgi IOPort group
+
+    # Applications probe: try list.cgi — works on any camera with ACAP support.
+    if "applications" not in discovered:
+        try:
+            resp = await client.post("/axis-cgi/applications/list.cgi")
+            if 'result="ok"' in resp.text:
+                discovered.add("applications")
+                logger.info("Applications (ACAP) detected for %s", camera.id)
+        except Exception:
+            pass
 
     # Merge: keep manual capabilities, add discovered ones
     manual = {c for c in camera.capabilities if c != "auto"}
@@ -1429,6 +1443,149 @@ TOOLS = [
             "properties": {},
         },
     ),
+    # --- Applications (ACAP) ---
+    Tool(
+        name="list_applications",
+        description=(
+            "List all installed ACAP applications on a camera with their status "
+            "(Running/Stopped/Idle), license validity, vendor, version, and resources used. "
+            "Use this to check if analytics apps like VMD, Object Analytics, or Loitering Guard are active."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="start_application",
+        description="Start a stopped ACAP application on a camera.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "package_name": {
+                    "type": "string",
+                    "description": "Application short name (e.g. 'objectanalytics', 'vmd'). Use list_applications to find names.",
+                },
+            },
+            "required": ["camera_id", "package_name"],
+        },
+    ),
+    Tool(
+        name="stop_application",
+        description="Stop a running ACAP application on a camera.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "package_name": {
+                    "type": "string",
+                    "description": "Application short name. Use list_applications to find names.",
+                },
+            },
+            "required": ["camera_id", "package_name"],
+        },
+    ),
+    Tool(
+        name="restart_application",
+        description="Restart an ACAP application on a camera. Useful after configuration changes.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "package_name": {
+                    "type": "string",
+                    "description": "Application short name. Use list_applications to find names.",
+                },
+            },
+            "required": ["camera_id", "package_name"],
+        },
+    ),
+    # --- Users ---
+    Tool(
+        name="get_users",
+        description=(
+            "List all user accounts on a camera with their group memberships "
+            "(admin, operator, viewer, ptz). "
+            "Service accounts (stsuser, AxisDeviceMgmt, pfagentvapix) are flagged separately."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    # --- View Areas ---
+    Tool(
+        name="list_view_areas",
+        description=(
+            "List all view areas (virtual channels) on a camera. "
+            "Each view area is a crop of the full sensor mapped to a virtual video channel. "
+            "Returns geometry (offset + size in pixels), canvas size, and grid alignment constraints."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="set_view_area_geometry",
+        description=(
+            "Set the crop geometry for a view area, digitally repositioning where the camera 'looks' "
+            "without moving the physical lens. Coordinates must align to the camera's grid (usually 8px). "
+            "Use list_view_areas first to get the view area ID, canvas size, and grid constraints."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "view_area_id": {
+                    "type": "integer",
+                    "description": "View area ID from list_view_areas",
+                },
+                "horizontal_offset": {
+                    "type": "integer",
+                    "description": "Left edge in pixels from canvas origin",
+                },
+                "vertical_offset": {
+                    "type": "integer",
+                    "description": "Top edge in pixels from canvas origin",
+                },
+                "horizontal_size": {
+                    "type": "integer",
+                    "description": "Width in pixels (must be >= min_size and <= canvas width)",
+                },
+                "vertical_size": {
+                    "type": "integer",
+                    "description": "Height in pixels (must be >= min_size and <= canvas height)",
+                },
+            },
+            "required": ["camera_id", "view_area_id", "horizontal_offset", "vertical_offset", "horizontal_size", "vertical_size"],
+        },
+    ),
+    Tool(
+        name="reset_view_area_geometry",
+        description="Reset a view area's geometry back to its factory default (full canvas).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "view_area_id": {
+                    "type": "integer",
+                    "description": "View area ID from list_view_areas",
+                },
+            },
+            "required": ["camera_id", "view_area_id"],
+        },
+    ),
     # --- System ---
     Tool(
         name="reboot_camera",
@@ -2010,6 +2167,56 @@ async def _h_disable_mqtt(cam, client, args):
     return _text_result(f"MQTT disabled on {cam.name}")
 
 
+async def _h_list_applications(cam, client, args):
+    result = await applications.list_applications(client)
+    return _text_result(result)
+
+
+async def _h_start_application(cam, client, args):
+    pkg = args["package_name"]
+    await applications.control_application(client, "start", pkg)
+    return _text_result(f"Started '{pkg}' on {cam.name}")
+
+
+async def _h_stop_application(cam, client, args):
+    pkg = args["package_name"]
+    await applications.control_application(client, "stop", pkg)
+    return _text_result(f"Stopped '{pkg}' on {cam.name}")
+
+
+async def _h_restart_application(cam, client, args):
+    pkg = args["package_name"]
+    await applications.control_application(client, "restart", pkg)
+    return _text_result(f"Restarted '{pkg}' on {cam.name}")
+
+
+async def _h_get_users(cam, client, args):
+    result = await users.get_users(client)
+    return _text_result(result)
+
+
+async def _h_list_view_areas(cam, client, args):
+    result = await view_area.list_view_areas(client)
+    return _text_result(result)
+
+
+async def _h_set_view_area_geometry(cam, client, args):
+    result = await view_area.set_view_area_geometry(
+        client,
+        view_area_id=args["view_area_id"],
+        horizontal_offset=args["horizontal_offset"],
+        vertical_offset=args["vertical_offset"],
+        horizontal_size=args["horizontal_size"],
+        vertical_size=args["vertical_size"],
+    )
+    return _text_result(result)
+
+
+async def _h_reset_view_area_geometry(cam, client, args):
+    result = await view_area.reset_view_area_geometry(client, view_area_id=args["view_area_id"])
+    return _text_result(result)
+
+
 async def _h_reboot_camera(cam, client, args):
     result = await system.reboot(client)
     return _text_result({
@@ -2097,6 +2304,14 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "configure_mqtt": ("mqtt", _h_configure_mqtt),
     "enable_mqtt": ("mqtt", _h_enable_mqtt),
     "disable_mqtt": ("mqtt", _h_disable_mqtt),
+    "list_applications": ("applications", _h_list_applications),
+    "start_application": ("applications", _h_start_application),
+    "stop_application": ("applications", _h_stop_application),
+    "restart_application": ("applications", _h_restart_application),
+    "get_users": (None, _h_get_users),
+    "list_view_areas": ("view_area", _h_list_view_areas),
+    "set_view_area_geometry": ("view_area", _h_set_view_area_geometry),
+    "reset_view_area_geometry": ("view_area", _h_reset_view_area_geometry),
     "reboot_camera": (None, _h_reboot_camera),
     "get_system_log": (None, _h_get_system_log),
     "get_audit_log": (None, _h_get_audit_log),

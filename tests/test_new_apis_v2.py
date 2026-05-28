@@ -566,6 +566,6 @@ class TestServerNewTools:
 
     @pytest.mark.asyncio
     async def test_tool_count_is_correct(self):
-        """Should have 65 tools total (61 previous + 4 new system tools)."""
+        """Should have 73 tools total (65 previous + 8 new tools)."""
         from server import TOOLS
-        assert len(TOOLS) == 65, f"Expected 65 tools, got {len(TOOLS)}"
+        assert len(TOOLS) == 73, f"Expected 73 tools, got {len(TOOLS)}"
