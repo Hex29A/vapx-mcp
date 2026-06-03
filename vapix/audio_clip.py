@@ -21,8 +21,6 @@ Requires cameras with built-in speaker hardware.
 
 from typing import Any
 
-import httpx
-
 from .client import VapixClient, VapixError
 
 _MEDIACLIP = "/axis-cgi/mediaclip.cgi"
