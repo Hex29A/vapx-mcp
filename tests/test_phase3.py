@@ -297,9 +297,9 @@ class TestServerPhase3:
 
     @pytest.mark.asyncio
     async def test_total_tool_count(self):
-        """Should have 73 tools total."""
+        """Should have 78 tools total."""
         from server import TOOLS
-        assert len(TOOLS) == 73, f"Expected 73 tools, got {len(TOOLS)}"
+        assert len(TOOLS) == 78, f"Expected 78 tools, got {len(TOOLS)}"
 
     @pytest.mark.asyncio
     async def test_handler_registry_complete(self):
