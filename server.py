@@ -57,6 +57,7 @@ from vapix import (
     analytics_metadata,
     applications,
     audio,
+    audio_clip,
     capture_mode,
     clear_view,
     daynight,
@@ -74,6 +75,7 @@ from vapix import (
     overlay,
     privacy_mask,
     ptz,
+    signed_video,
     siren,
     storage,
     stream_profiles,
@@ -134,6 +136,8 @@ _API_TO_CAPABILITY: dict[str, str] = {
     "event-mqtt-bridge": "mqtt",
     "param-cgi": "daynight",
     "view-area": "view_area",
+    "mediaclip": "audio_clip",
+    "signed-video": "signed_video",
 }
 
 
@@ -1618,6 +1622,88 @@ TOOLS = [
             "required": ["camera_id", "view_area_id"],
         },
     ),
+    # --- Audio Clips ---
+    Tool(
+        name="list_audio_clips",
+        description=(
+            "List audio clips stored on a camera. "
+            "Returns each clip's integer ID, name, and storage location. "
+            "Only available on cameras with built-in speaker hardware."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="play_audio_clip",
+        description=(
+            "Trigger playback of an audio clip on the camera's built-in speaker. "
+            "Accepts clip name (string) or integer ID. "
+            "Use list_audio_clips to see available clips."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "name_or_id": {
+                    "type": "string",
+                    "description": "Clip name or integer ID",
+                },
+            },
+            "required": ["camera_id", "name_or_id"],
+        },
+    ),
+    Tool(
+        name="stop_audio_clip",
+        description="Stop any currently playing audio clip on the camera.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
+    Tool(
+        name="delete_audio_clip",
+        description=(
+            "Delete an audio clip from the camera. "
+            "Accepts clip name (string) or integer ID."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+                "name_or_id": {
+                    "type": "string",
+                    "description": "Clip name or integer ID",
+                },
+            },
+            "required": ["camera_id", "name_or_id"],
+        },
+    ),
+    # --- Signed Video ---
+    Tool(
+        name="get_signed_video_status",
+        description=(
+            "Check whether signed video is enabled on a camera. "
+            "Signed video cryptographically signs recordings so tampering can be detected. "
+            "Tries signedvideo.cgi first; falls back to param.cgi on firmware 12.x where "
+            "the CGI endpoint is absent despite appearing in API discovery. "
+            "Response includes a 'source' field indicating which path provided the data."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "camera_id": {"type": "string", "description": "Camera identifier"},
+            },
+            "required": ["camera_id"],
+        },
+    ),
     # --- System ---
     Tool(
         name="reboot_camera",
@@ -2273,6 +2359,31 @@ async def _h_reset_view_area_geometry(cam, client, args):
     return _text_result(result)
 
 
+async def _h_list_audio_clips(cam, client, args):
+    result = await audio_clip.list_clips(client)
+    return _text_result({"clips": result, "count": len(result)})
+
+
+async def _h_play_audio_clip(cam, client, args):
+    result = await audio_clip.play_clip(client, args["name_or_id"])
+    return _text_result(result)
+
+
+async def _h_stop_audio_clip(cam, client, args):
+    result = await audio_clip.stop_clips(client)
+    return _text_result(result)
+
+
+async def _h_delete_audio_clip(cam, client, args):
+    result = await audio_clip.delete_clip(client, args["name_or_id"])
+    return _text_result(result)
+
+
+async def _h_get_signed_video_status(cam, client, args):
+    result = await signed_video.get_status(client)
+    return _text_result(result)
+
+
 async def _h_reboot_camera(cam, client, args):
     result = await system.reboot(client)
     return _text_result({
@@ -2368,6 +2479,11 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
     "list_view_areas": ("view_area", _h_list_view_areas),
     "set_view_area_geometry": ("view_area", _h_set_view_area_geometry),
     "reset_view_area_geometry": ("view_area", _h_reset_view_area_geometry),
+    "list_audio_clips": ("audio_clip", _h_list_audio_clips),
+    "play_audio_clip": ("audio_clip", _h_play_audio_clip),
+    "stop_audio_clip": ("audio_clip", _h_stop_audio_clip),
+    "delete_audio_clip": ("audio_clip", _h_delete_audio_clip),
+    "get_signed_video_status": ("signed_video", _h_get_signed_video_status),
     "reboot_camera": (None, _h_reboot_camera),
     "get_system_log": (None, _h_get_system_log),
     "get_audit_log": (None, _h_get_audit_log),

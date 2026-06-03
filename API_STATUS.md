@@ -178,6 +178,77 @@ Checked items are implemented, tested, and available as MCP tools.
   - Pros: Control what analytics data is generated. Enable only needed producers.
   - Cons: Requires AXIS Object Analytics or similar ACAP. Requires `analytics_metadata` capability.
 
+- [x] **Temperature Control** — `vapix/temperature.py`
+  - Endpoint: `POST /axis-cgi/temperaturecontrol.cgi`
+  - Tools: `get_temperature`
+  - Read-only. Read temperature sensors and heater status.
+  - Pros: Monitor camera enclosure and environment temperatures. Detect thermal issues.
+  - Cons: Only cameras with temperature sensors. Requires `temperature` capability.
+
+- [x] **Stream Status** — `vapix/stream_status.py`
+  - Endpoint: `GET /axis-cgi/streamstatus.cgi`
+  - Tools: `get_stream_status`
+  - Read-only. Real-time stream diagnostics (clients, bitrate, FPS).
+  - Pros: AI can diagnose stream issues without camera UI access.
+  - Cons: Requires `stream_status` capability.
+
+- [x] **MQTT Client** — `vapix/mqtt.py`
+  - Endpoint: `POST /axis-cgi/mqtt.cgi`
+  - Tools: `get_mqtt_config`, `configure_mqtt`, `enable_mqtt`, `disable_mqtt`
+  - Read-write. Configure and control the camera's built-in MQTT client.
+  - Pros: Enable event-driven camera integration. Connect cameras to IoT brokers.
+  - Cons: Infrastructure setup task. Requires `mqtt` capability.
+
+- [x] **ACAP Applications** — `vapix/applications.py`
+  - Endpoint: `GET /axis-cgi/applications/list.cgi`, `POST /axis-cgi/applications/control.cgi`
+  - Tools: `list_applications`, `start_application`, `stop_application`, `restart_application`
+  - Read-write. Manage installed ACAP app lifecycle.
+  - Pros: AI can restart crashed analytics apps, inspect installed software.
+  - Cons: Install/uninstall not included (too destructive). Requires `applications` capability.
+
+- [x] **User Listing** — `vapix/users.py`
+  - Endpoint: `GET /axis-cgi/admin/pwdgrp.cgi`
+  - Tools: `get_users`
+  - Read-only. List user accounts and group memberships.
+  - Pros: Security audit — check who has access. Works on all cameras.
+  - Cons: Read-only; password changes not included.
+
+- [x] **View Areas** — `vapix/view_area.py`
+  - Endpoints: `POST /axis-cgi/viewarea/info.cgi`, `POST /axis-cgi/viewarea/configure.cgi`
+  - Tools: `list_view_areas`, `set_view_area_geometry`, `reset_view_area_geometry`
+  - Read-write. Manage virtual view areas (digital crop/reframe without moving the lens).
+  - Pros: AI can reframe camera views digitally. Useful for multisensor cameras.
+  - Cons: Requires cameras with view area support. Requires `view_area` capability.
+
+- [x] **Stream Status** — `vapix/stream_status.py`
+  - Endpoint: `POST /axis-cgi/streamstatus.cgi`
+  - Tools: `get_stream_status`
+  - Read-only. Returns active stream count, bitrate, FPS, resolution, codec per stream.
+  - Pros: AI can verify streams are being consumed, monitor bandwidth, detect stale streams.
+  - Cons: Returns empty list when no streams are active. Requires `stream_status` capability.
+
+- [x] **Audio Clip Management** — `vapix/audio_clip.py`
+  - Endpoints: `GET /axis-cgi/mediaclip.cgi` (action=list/play/stop/remove/upload), `GET /axis-cgi/param.cgi?group=MediaClip`
+  - Tools: `list_audio_clips`, `play_audio_clip`, `stop_audio_clip`, `delete_audio_clip`
+  - Read-write. Manage audio clips stored on the camera and trigger playback on built-in speaker.
+  - Pros: AI can play deterrent sounds when motion is detected. Direct integration with event-driven scenarios.
+  - Cons: Only cameras with built-in speaker hardware. Upload not exposed as MCP tool (binary data). Requires `audio_clip` capability.
+
+- [x] **Signed Video** — `vapix/signed_video.py`
+  - Primary: `POST /axis-cgi/signedvideo.cgi` — Fallback: `GET /axis-cgi/param.cgi?group=root.SignedVideo`
+  - Tools: `get_signed_video_status`
+  - Read-only. Check if signed video is enabled (cryptographic integrity protection for recordings).
+  - **Note**: `signedvideo.cgi` returns 404 on some firmware 12.x cameras (e.g. M3128-LVE, M2035-LE) despite appearing in API discovery. Automatically falls back to param.cgi. Response includes `source` field indicating which path was used.
+  - Pros: AI can verify recording integrity before relying on footage for critical decisions.
+  - Cons: Read-only; enabling/disabling not implemented. Requires `signed_video` capability.
+
+- [x] **System** — `vapix/system.py`
+  - Endpoints: `/axis-cgi/firmwaremanagement.cgi`, `/axis-cgi/admin/systemlog.cgi`, `/axis-cgi/auditlog.cgi`, `/axis-cgi/systemready.cgi`
+  - Tools: `reboot_camera`, `get_system_log`, `get_audit_log`, `check_systemready`
+  - Read-write. Core system operations available on all cameras regardless of capabilities.
+  - Pros: Essential ops — reboot after config changes, read logs for diagnostics, verify readiness.
+  - Cons: `reboot_camera` is destructive (30–60s downtime). Falls back to `restart.cgi` on firmware < 7.40.
+
 ---
 
 ## Server Features (Non-API)
@@ -199,9 +270,8 @@ All previous future candidates have been implemented. No remaining candidates at
 
 ## Not Planned (Low Value / High Risk)
 
-- [ ] **Firmware Management** — Too destructive (upgrade, factory reset, reboot).
+- [ ] **Firmware Upgrade / Factory Reset** — Too destructive. (`reboot_camera` is implemented via the same endpoint but scoped safely.)
 - [ ] **Network Settings** — Misconfiguration can brick camera connectivity.
-- [ ] **User Management** — Security-sensitive, limited scope (password policies only, BETA).
-- [ ] **MQTT Client Configuration** — Infrastructure setup, not operational control.
-- [ ] **Event Action Rules (SOAP)** — SOAP/XML complexity. WebSocket events are superior.
-- [ ] **Param API (new framework)** — BETA, unstable. Domain-specific APIs are better.
+- [ ] **User Management (write)** — Password changes and user creation are security-sensitive. Read-only `get_users` is implemented.
+- [ ] **Event Action Rules (SOAP)** — SOAP/XML complexity. WebSocket `poll_events` is superior.
+- [ ] **Param API (new framework)** — BETA, unstable. Domain-specific APIs are preferred.
