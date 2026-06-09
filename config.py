@@ -59,6 +59,10 @@ class CameraConfig(BaseModel):
         default=None,
         description="Override mask coordinate transform: 'rotate0', 'rotate90', 'rotate180', 'rotate270', 'mirror_x'. Overrides auto-detection.",
     )
+    timeout: float = Field(
+        default=15.0,
+        description="HTTP read timeout in seconds (connect timeout is always 10s).",
+    )
 
     @model_validator(mode="after")
     def set_default_port(self) -> "CameraConfig":

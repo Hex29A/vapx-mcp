@@ -57,7 +57,8 @@ class VapixClient:
             base_url=camera.base_url,
             auth=auth,
             verify=camera.verify_ssl,
-            timeout=httpx.Timeout(15.0, connect=10.0),
+            timeout=httpx.Timeout(camera.timeout, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, keepalive_expiry=30.0),
             follow_redirects=True,
         )
 
