@@ -2596,6 +2596,7 @@ async def main():
         # current public API — it owns transport lifecycle per request and
         # exposes a plain ASGI handle_request() to mount directly.
         import contextlib
+
         import uvicorn
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from starlette.applications import Starlette
