@@ -171,6 +171,7 @@ class TestGetCameraInfo:
                     "Brand": "AXIS",
                     "ProdNbr": "M2036-LE",
                     "Version": "11.6.54",
+                    "WebURL": "https://www.axis.com",
                 }
             },
         }
@@ -187,6 +188,9 @@ class TestGetCameraInfo:
             data = json.loads(result[0].text)
             assert data["Brand"] == "AXIS"
             assert data["ProdNbr"] == "M2036-LE"
+            # issue #15: generic WebURL replaced with a real per-camera link
+            assert "WebURL" not in data
+            assert data["DeviceURL"] == "http://192.168.1.100"
 
 
 # ---------------------------------------------------------------------------

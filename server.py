@@ -763,7 +763,7 @@ TOOLS = [
                 },
                 "max_recordings": {
                     "type": "integer",
-                    "description": "Maximum number of recordings to return",
+                    "description": "Maximum number of recordings to return (default: 1000)",
                 },
             },
             "required": ["camera_id"],
@@ -1966,7 +1966,13 @@ _GLOBAL_HANDLERS: dict[str, Any] = {
 # Each handler signature: async (camera, client, args) -> list[Content]
 # ---------------------------------------------------------------------------
 async def _h_get_camera_info(cam, client, args):
-    return _text_result(await device.get_all_properties(client))
+    props = await device.get_all_properties(client)
+    # WebURL is always the generic https://www.axis.com regardless of model —
+    # useless noise. Replace with a clickable link to this camera's own
+    # web admin UI instead (issue #15).
+    props.pop("WebURL", None)
+    props["DeviceURL"] = f"http://{cam.host}"
+    return _text_result(props)
 
 
 async def _h_get_snapshot(cam, client, args):
@@ -2104,7 +2110,7 @@ async def _h_get_disk_status(cam, client, args):
 async def _h_list_recordings(cam, client, args):
     return _text_result(await storage.list_recordings(
         client, disk_id=args.get("disk_id"), start_time=args.get("start_time"),
-        stop_time=args.get("stop_time"), max_recordings=args.get("max_recordings"),
+        stop_time=args.get("stop_time"), max_recordings=args.get("max_recordings") or 1000,
     ))
 
 
@@ -2583,28 +2589,37 @@ async def main():
         await server.serve()
 
     elif args.transport == "streamable-http":
+        # Issue #39: StreamableHTTPServerTransport's constructor dropped
+        # mcp_endpoint/is_json (now mcp_session_id/is_json_response_enabled,
+        # and it's meant to be instantiated per-session, not once for the
+        # whole app). The high-level StreamableHTTPSessionManager is the
+        # current public API — it owns transport lifecycle per request and
+        # exposes a plain ASGI handle_request() to mount directly.
+        import contextlib
         import uvicorn
-        from mcp.server.streamable_http import StreamableHTTPServerTransport
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from starlette.applications import Starlette
         from starlette.routing import Mount
 
-        transport = StreamableHTTPServerTransport(
-            mcp_endpoint="/mcp",
-            is_json=True,
+        session_manager = StreamableHTTPSessionManager(
+            app=app,
+            json_response=True,
+            stateless=True,
         )
 
         async def handle_mcp(scope, receive, send):
-            async with transport.connect(scope, receive, send) as streams:
-                await app.run(
-                    streams[0],
-                    streams[1],
-                    app.create_initialization_options(),
-                )
+            await session_manager.handle_request(scope, receive, send)
+
+        @contextlib.asynccontextmanager
+        async def lifespan(_starlette_app):
+            async with session_manager.run():
+                yield
 
         starlette_app = Starlette(
             routes=[
                 Mount("/mcp", app=handle_mcp),
             ],
+            lifespan=lifespan,
         )
         uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
         server = uvicorn.Server(uv_config)

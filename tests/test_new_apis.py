@@ -554,22 +554,27 @@ class TestListRecordings:
     async def test_list_all_recordings(self):
         client = VapixClient(_make_camera())
         with respx.mock:
-            respx.get(f"{BASE_URL}/axis-cgi/record/list.cgi").mock(
+            route = respx.get(f"{BASE_URL}/axis-cgi/record/list.cgi").mock(
                 return_value=httpx.Response(200, text=RECORDINGS_XML,
                                            headers={"content-type": "text/xml"})
             )
             recs = await storage.list_recordings(client)
+            # maxnumberofrecordings must always be sent, even when the caller
+            # doesn't pass max_recordings — some firmware returns only the
+            # single most recent recording when the param is omitted (#16)
+            assert route.calls.last.request.url.params["maxnumberofrecordings"] == "1000"
             # First item is summary
             summary = recs[0]
             assert summary["_summary"] is True
-            assert summary["total"] == 2
+            assert summary["total_recordings"] == 2
             assert summary["returned"] == 2
-            # Actual recordings
-            assert recs[1]["recordingid"] == "20240115_081211_016F_00408C1834FD"
-            assert recs[1]["starttime"] == "2024-01-15T08:12:11Z"
+            # Actual recordings — keys normalized to match get_recording_info/
+            # export_recording input params (issue #17)
+            assert recs[1]["recording_id"] == "20240115_081211_016F_00408C1834FD"
+            assert recs[1]["start_time"] == "2024-01-15T08:12:11Z"
             assert recs[1]["video"]["width"] == "1920"
             assert "audio" in recs[1]
-            assert recs[2]["recordingid"] == "20240115_093530_025B_00408C1834FD"
+            assert recs[2]["recording_id"] == "20240115_093530_025B_00408C1834FD"
             assert "audio" not in recs[2]
 
     @pytest.mark.asyncio

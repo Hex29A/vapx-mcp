@@ -82,6 +82,22 @@ async def get_disk_health(client: VapixClient) -> list[dict[str, Any]]:
     return disks if disks else [{"raw": text.strip()}]
 
 
+# XML attribute names (Axis convention) -> snake_case keys matching the
+# camera_id/recording_id/disk_id params expected by get_recording_info and
+# export_recording, so list_recordings output can be fed straight back in
+# without an LLM having to silently translate the names (issue #17).
+_RECORDING_KEY_MAP = {
+    "recordingid": "recording_id",
+    "diskid": "disk_id",
+    "starttime": "start_time",
+    "starttimelocal": "start_time_local",
+    "stoptime": "stop_time",
+    "stoptimelocal": "stop_time_local",
+    "recordingtype": "recording_type",
+    "eventtrigger": "event_trigger",
+}
+
+
 async def list_recordings(
     client: VapixClient,
     *,
@@ -89,7 +105,7 @@ async def list_recordings(
     disk_id: str | None = None,
     start_time: str | None = None,
     stop_time: str | None = None,
-    max_recordings: int | None = None,
+    max_recordings: int = 1000,
 ) -> list[dict[str, Any]]:
     """
     List recordings stored on the device.
@@ -99,21 +115,25 @@ async def list_recordings(
         disk_id: Filter by disk (e.g. "SD_DISK", "NetworkShare").
         start_time: Filter start time (ISO 8601 UTC, e.g. "2024-01-01T00:00:00Z").
         stop_time: Filter stop time.
-        max_recordings: Maximum number of recordings to return.
+        max_recordings: Maximum number of recordings to return (default 1000).
+            Always sent to the camera — some firmware returns only the single
+            most recent recording when this parameter is omitted, despite the
+            VAPIX docs saying "returns all if omitted" (issue #16).
 
     Returns list of dicts with keys:
-        recordingid, diskid, starttime, stoptime, recordingtype, eventtrigger,
-        source (video/audio attributes as nested dicts)
+        recording_id, disk_id, start_time, stop_time, recording_type,
+        event_trigger, source (video/audio attributes as nested dicts)
     """
-    params: dict[str, Any] = {"recordingid": recording_id}
+    params: dict[str, Any] = {
+        "recordingid": recording_id,
+        "maxnumberofrecordings": max_recordings,
+    }
     if disk_id:
         params["diskid"] = disk_id
     if start_time:
         params["starttime"] = start_time
     if stop_time:
         params["stoptime"] = stop_time
-    if max_recordings:
-        params["maxnumberofrecordings"] = max_recordings
 
     response = await client.get("/axis-cgi/record/list.cgi", params)
     text = response.text
@@ -122,7 +142,8 @@ async def list_recordings(
     recordings = []
 
     for rec in root.iter("recording"):
-        entry: dict[str, Any] = dict(rec.attrib)
+        raw: dict[str, Any] = dict(rec.attrib)
+        entry: dict[str, Any] = {_RECORDING_KEY_MAP.get(k, k): v for k, v in raw.items()}
         # Extract video/audio sub-elements
         for child in rec:
             if child.tag in ("video", "audio"):
@@ -135,7 +156,7 @@ async def list_recordings(
         if total:
             recordings.insert(0, {
                 "_summary": True,
-                "total": int(total),
+                "total_recordings": int(total),
                 "returned": int(recs_elem.attrib.get("numberofrecordings", 0)),
             })
         break
