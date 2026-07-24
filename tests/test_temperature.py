@@ -145,3 +145,36 @@ class TestParseResponse:
         result = temperature._parse_sensor_response(text)
         assert len(result["sensors"]) == 1
         assert result["sensors"][0]["name"] == "CPU"
+
+    def test_camera_provided_fahrenheit_is_numeric(self):
+        """Regression: cameras send their own Sensor.SX.Fahrenheit line, which
+        was previously stored as a raw string. It must stay a float."""
+        text = (
+            "Sensor.S0.Name=CPU\n"
+            "Sensor.S0.Celsius=28.03\n"
+            "Sensor.S0.Fahrenheit=82.46\n"
+        )
+        result = temperature._parse_sensor_response(text)
+        fahrenheit = result["sensors"][0]["fahrenheit"]
+        assert isinstance(fahrenheit, float) and not isinstance(fahrenheit, str)
+        assert fahrenheit == 82.46
+        assert isinstance(result["sensors"][0]["celsius"], float)
+
+    def test_fahrenheit_computed_when_camera_omits_it(self):
+        """When only Celsius is sent, Fahrenheit is still returned as a number."""
+        text = "Sensor.S0.Name=CPU\nSensor.S0.Celsius=25.00\n"
+        result = temperature._parse_sensor_response(text)
+        fahrenheit = result["sensors"][0]["fahrenheit"]
+        assert isinstance(fahrenheit, float)
+        assert fahrenheit == 77.00
+
+    def test_fahrenheit_field_order_independent(self):
+        """Field order must not matter — the camera's Fahrenheit value wins as a number."""
+        text = (
+            "Sensor.S0.Name=CPU\n"
+            "Sensor.S0.Fahrenheit=100.21\n"
+            "Sensor.S0.Celsius=37.89\n"
+        )
+        result = temperature._parse_sensor_response(text)
+        assert result["sensors"][0]["fahrenheit"] == 100.21
+        assert isinstance(result["sensors"][0]["fahrenheit"], float)

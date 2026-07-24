@@ -10,6 +10,7 @@ and heater status from Axis cameras running AXIS OS 12.x+.
 Response format (legacy key=value):
     Sensor.S0.Name=CPU
     Sensor.S0.Celsius=30.24
+    Sensor.S0.Fahrenheit=86.43
     Heater.H0.Status=Stopped
 """
 
@@ -42,7 +43,15 @@ def _parse_sensor_response(text: str) -> dict[str, Any]:
             if field == "Celsius":
                 celsius = float(value)
                 sensors[idx]["celsius"] = round(celsius, 2)
-                sensors[idx]["fahrenheit"] = round(celsius * 9 / 5 + 32, 2)
+                # Fallback conversion — only used if the camera does not send
+                # its own Sensor.SX.Fahrenheit line (handled below).
+                sensors[idx].setdefault(
+                    "fahrenheit", round(celsius * 9 / 5 + 32, 2)
+                )
+            elif field == "Fahrenheit":
+                # Some cameras report Fahrenheit directly. Parse it as a number
+                # so both celsius and fahrenheit are always floats, never strings.
+                sensors[idx]["fahrenheit"] = round(float(value), 2)
             else:
                 sensors[idx][field.lower()] = value
 
