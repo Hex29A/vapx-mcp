@@ -309,3 +309,21 @@ class TestIssue13LegacyIOCapability:
                 await _clients.pop("modern").close()
 
         assert "io" in cam.capabilities
+
+
+class TestSystemreadyApiVersion:
+    """systemready must request a version that actually returns the policy.
+
+    apiVersion 1.1 never includes passphrasepolicy, which callers need to
+    know what password the device will accept. The device negotiates down,
+    so asking for a newer version is safe on old firmware.
+    """
+
+    def test_requests_version_that_returns_passphrasepolicy(self):
+        import inspect
+
+        from vapix import system
+
+        src = inspect.getsource(system.check_systemready)
+        assert '"apiVersion": "1.1"' not in src, "1.1 omits passphrasepolicy"
+        assert '"apiVersion": "1.4"' in src

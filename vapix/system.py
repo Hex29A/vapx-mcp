@@ -88,13 +88,18 @@ async def check_systemready(client: VapixClient, timeout: int = 10) -> dict[str,
         timeout: Max seconds to wait for readiness (default 10).
 
     Returns:
-        Dict with systemready (yes/no), needsetup (yes/no), uptime (seconds),
-        and bootid.
+        Dict with systemready (yes/no), needsetup (yes/no), and — on AXIS OS
+        that supports it — uptime (seconds), bootid, previewmode and
+        passphrasepolicy (none/length/complex). Older firmware answers
+        apiVersion 1.2 and omits everything past the first two fields.
     """
     result = await client.post_json(
         _SYSTEMREADY_PATH,
         {
-            "apiVersion": "1.1",
+            # Ask for a recent version; the device negotiates down to what it
+            # supports. 1.1 never returns passphrasepolicy, which callers need
+            # to know the device's password rules.
+            "apiVersion": "1.4",
             "context": "vapx-mcp",
             "method": "systemready",
             "params": {"timeout": timeout},
