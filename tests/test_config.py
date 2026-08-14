@@ -304,3 +304,130 @@ cameras:
         cfg = load_config(config_file)
         assert cfg.cameras[0].id == "front"
         assert cfg.cameras[0].capabilities == ["snapshot", "ptz"]
+
+
+# ---------------------------------------------------------------------------
+# Resilience: one bad entry must not take the whole server down
+# ---------------------------------------------------------------------------
+
+class TestMalformedEntriesAreSkipped:
+    """A single unusable camera must not cost us all the others.
+
+    vapx writes into the same cameras.yaml this server reads, so a half-written
+    or hand-edited entry is a realistic event — it used to abort startup.
+    """
+
+    def test_camera_without_password_is_skipped(self, tmp_path):
+        yaml_content = """
+defaults:
+  user: root
+cameras:
+  good:
+    host: "192.168.1.10"
+    pass: "secret"
+  nopass:
+    host: "192.168.1.11"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.camera_ids() == ["good"]
+        assert len(cfg.skipped) == 1
+        assert "nopass" in cfg.skipped[0]
+        assert "password" in cfg.skipped[0]
+
+    def test_unset_env_var_is_skipped_not_fatal(self, tmp_path):
+        yaml_content = """
+cameras:
+  good:
+    host: "192.168.1.10"
+    pass: "secret"
+  broken:
+    host: "192.168.1.11"
+    pass: "${VAPX_DEFINITELY_NOT_SET_12345}"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("VAPX_DEFINITELY_NOT_SET_12345", None)
+            cfg = load_config(config_file)
+
+        assert cfg.camera_ids() == ["good"]
+        assert "VAPX_DEFINITELY_NOT_SET_12345" in cfg.skipped[0]
+
+    def test_bad_host_is_skipped(self, tmp_path):
+        yaml_content = """
+cameras:
+  good:
+    host: "192.168.1.10"
+    pass: "secret"
+  proto:
+    host: "https://192.168.1.11"
+    pass: "secret"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.camera_ids() == ["good"]
+        assert "proto" in cfg.skipped[0]
+
+    def test_all_cameras_bad_still_raises(self, tmp_path):
+        yaml_content = """
+cameras:
+  nopass:
+    host: "192.168.1.11"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        with pytest.raises(ValueError, match="No usable cameras"):
+            load_config(config_file)
+
+    def test_skipped_is_empty_when_all_valid(self, tmp_path):
+        yaml_content = """
+cameras:
+  good:
+    host: "192.168.1.10"
+    pass: "secret"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.skipped == []
+
+    def test_non_mapping_entry_is_skipped(self, tmp_path):
+        yaml_content = """
+cameras:
+  - id: good
+    name: "Good"
+    host: "192.168.1.10"
+    password: "secret"
+  - "just a string"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        cfg = load_config(config_file)
+        assert cfg.camera_ids() == ["good"]
+        assert len(cfg.skipped) == 1
+
+    def test_skip_reason_is_logged(self, tmp_path, caplog):
+        yaml_content = """
+cameras:
+  good:
+    host: "192.168.1.10"
+    pass: "secret"
+  nopass:
+    host: "192.168.1.11"
+"""
+        config_file = tmp_path / "cameras.yaml"
+        config_file.write_text(yaml_content)
+
+        with caplog.at_level("WARNING"):
+            load_config(config_file)
+
+        assert any("nopass" in r.getMessage() for r in caplog.records)

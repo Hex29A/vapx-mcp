@@ -5,13 +5,16 @@ Loads camera definitions from cameras.yaml, substitutes environment variables
 in password fields (${ENV_VAR} syntax), and validates with Pydantic.
 """
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+logger = logging.getLogger("vapx-mcp.config")
 
 
 def _substitute_env_vars(value: str) -> str:
@@ -95,6 +98,10 @@ class AppConfig(BaseModel):
 
     cameras: list[CameraConfig] = Field(
         ..., min_length=1, description="List of camera configurations"
+    )
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Human-readable reasons for camera entries that failed validation and were skipped",
     )
 
     def get_camera(self, camera_id: str) -> Optional[CameraConfig]:
@@ -212,4 +219,67 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     if isinstance(cameras_raw, dict):
         raw = _convert_vapx_format(raw)
 
-    return AppConfig(**raw)
+    return _build_app_config(raw["cameras"], resolved_path)
+
+
+def _describe_error(exc: Exception) -> str:
+    """Condense a validation failure into one readable line."""
+    if isinstance(exc, ValidationError):
+        parts = []
+        for err in exc.errors():
+            field = ".".join(str(x) for x in err["loc"]) or "config"
+            parts.append(f"{field}: {err['msg']}")
+        return "; ".join(parts)
+    return str(exc)
+
+
+def _build_app_config(entries: object, source: Path) -> AppConfig:
+    """
+    Validate camera entries one at a time.
+
+    A single malformed entry (missing password, unset ${ENV_VAR}, bad host)
+    must not take the whole server down with it — the other cameras stay
+    usable and the bad one is logged and skipped. Only an empty result is
+    fatal, since a server with no cameras cannot do anything.
+    """
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"Invalid config format in {source}: 'cameras' must be a mapping or a list"
+        )
+
+    cameras: list[CameraConfig] = []
+    skipped: list[str] = []
+
+    for index, entry in enumerate(entries):
+        if isinstance(entry, dict):
+            cam_id = str(entry.get("id", f"#{index}"))
+        else:
+            cam_id = f"#{index}"
+
+        if not isinstance(entry, dict):
+            reason = f"camera '{cam_id}': entry is not a mapping"
+            skipped.append(reason)
+            logger.warning("Skipping %s in %s", reason, source)
+            continue
+
+        try:
+            cameras.append(CameraConfig(**entry))
+        except (ValidationError, ValueError, TypeError) as exc:
+            reason = f"camera '{cam_id}': {_describe_error(exc)}"
+            skipped.append(reason)
+            logger.warning("Skipping %s in %s", reason, source)
+
+    if not cameras:
+        detail = "; ".join(skipped) if skipped else "no camera entries found"
+        raise ValueError(f"No usable cameras in {source}: {detail}")
+
+    if skipped:
+        logger.warning(
+            "Loaded %d camera(s) from %s, skipped %d: %s",
+            len(cameras),
+            source,
+            len(skipped),
+            "; ".join(skipped),
+        )
+
+    return AppConfig(cameras=cameras, skipped=skipped)
