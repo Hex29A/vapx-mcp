@@ -97,10 +97,11 @@ This project is part of a two-tool ecosystem for Axis cameras. Both tools share 
 | `snapshot_all` | Capture snapshots from all cameras at once | Multi-camera batch |
 | `status_all` | Get online/offline status of all cameras | Multi-camera batch |
 
-**73 tools** across 26 VAPIX API families.
+**78 tools** across 26 VAPIX API families.
 
 ## Additional Features
 
+- **Tolerant config loading**: a camera entry that fails validation — missing password, an unset `${ENV_VAR}`, a host with a protocol prefix — is logged and skipped rather than aborting startup. The remaining cameras load normally, and the reasons are kept on `AppConfig.skipped`. Only an empty result is fatal. This matters because `cameras.yaml` is shared with the [vapx](https://github.com/Hex29A/vapx) CLI, which writes to it.
 - **Auto-capability detection**: Add `auto` to a camera's capabilities list to auto-discover supported APIs via VAPIX API Discovery. Detected capabilities are merged with manually specified ones.
 - **MCP Resources**: Cameras expose `camera://{id}/snapshot` (live JPEG) and `camera://{id}/info` (device properties) as MCP resources.
 - **Streamable HTTP transport**: Run with `--transport streamable-http` for the latest MCP transport protocol.
