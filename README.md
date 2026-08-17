@@ -145,7 +145,8 @@ Add to your MCP client config (e.g. `~/.claude.json`):
       "args": [
         "run", "-i", "--rm",
         "--network=host",
-        "-v", "/path/to/cameras.yaml:/app/cameras.yaml:ro",
+        "-v", "/path/to/config-dir:/app/conf:ro",
+        "-e", "VAPIX_CONFIG=/app/conf/cameras.yaml",
         "-v", "/path/to/exports:/exports",
         "--env-file", "/path/to/.env",
         "vapx-mcp"
@@ -154,6 +155,12 @@ Add to your MCP client config (e.g. `~/.claude.json`):
   }
 }
 ```
+
+> **Mount the directory, not the file.** `cameras.yaml` is rewritten atomically
+> (temp file + rename), which replaces the inode. A bind mount of the file itself
+> is bound to the old inode, so the container would keep reading the config as it
+> was when it started — edits from `vapx config add/rename/remove` would never
+> reach it. Mounting the directory lets the server pick changes up on its own.
 
 > **`--network=host`** is required so the container can reach cameras on your local LAN.
 > **`-v .../exports:/exports`** is needed if you use `export_recording` — without it, exported files are lost when the container exits. Set `VAPIX_EXPORTS_DIR` env var to change the export path.

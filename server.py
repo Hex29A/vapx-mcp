@@ -35,6 +35,7 @@ Tools provided:
 """
 
 import argparse
+import asyncio
 import base64
 import json
 import logging
@@ -106,6 +107,8 @@ app = Server("vapx-mcp")
 config: AppConfig | None = None
 # Cache VapixClient instances per camera_id
 _clients: dict[str, VapixClient] = {}
+# Modification time of cameras.yaml as of the last (re)load
+_config_mtime: tuple[float, int] | None = None
 
 # Map VAPIX API discovery IDs to our capability names.
 # Note: param-cgi is the legacy parameter API; we map it to daynight since
@@ -143,10 +146,105 @@ _API_TO_CAPABILITY: dict[str, str] = {
 
 def _get_config() -> AppConfig:
     """Get the loaded config, raising if not initialized."""
-    global config
+    global config, _config_mtime
     if config is None:
         config = load_config()
+        _config_mtime = _mtime_of(config.source)
     return config
+
+
+def _mtime_of(path) -> tuple[float, int] | None:
+    """Change stamp for the config file, or None if it cannot be read.
+
+    Size is compared alongside the timestamp: on a filesystem with coarse
+    mtime granularity two edits within the same tick would otherwise look
+    identical, and the second one would be missed until something else
+    touched the file.
+    """
+    if path is None:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime, st.st_size)
+
+
+async def _reload_config_if_changed() -> None:
+    """Pick up edits to cameras.yaml without restarting the server.
+
+    Cameras are added, renamed and removed with `vapx config …` while this
+    server is running; caching the file for the lifetime of the process meant
+    answering from a config that no longer existed — reporting a camera that
+    had been removed, or missing one that had just been added.
+
+    A parse failure keeps the previous config: someone saving the file
+    half-written should not take the running server down with it.
+    """
+    global config, _config_mtime
+
+    if config is None:
+        return
+    current = _mtime_of(config.source)
+    if current is None or current == _config_mtime:
+        return
+
+    source = config.source
+    try:
+        fresh = load_config(source)
+    except Exception as e:
+        # Keep serving the config we have; log once per change.
+        _config_mtime = current
+        logger.warning("Ignoring changed %s — it did not load: %s", source, e)
+        return
+
+    before = {c.id: c for c in config.cameras}
+    after = {c.id: c for c in fresh.cameras}
+
+    # Drop pooled clients for cameras that are gone or whose connection details
+    # changed; a stale client would keep talking to the old host or credentials.
+    for cam_id, old in before.items():
+        new = after.get(cam_id)
+        if new is not None and (new.base_url, new.username, new.password) == (
+            old.base_url,
+            old.username,
+            old.password,
+        ):
+            continue
+        client = _clients.pop(cam_id, None)
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Could not close pooled client for %s", cam_id, exc_info=True)
+
+    config = fresh
+    _config_mtime = current
+
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    logger.info(
+        "Reloaded %s: %d camera(s)%s%s",
+        source,
+        len(fresh.cameras),
+        f", added {', '.join(added)}" if added else "",
+        f", removed {', '.join(removed)}" if removed else "",
+    )
+
+    # New cameras arrive with capabilities unprobed, so list_cameras would
+    # report them as snapshot-only until something else triggered detection.
+    fresh_cams = [
+        after[cam_id]
+        for cam_id in added
+        if "auto" in after[cam_id].capabilities or after[cam_id].capabilities == ["snapshot"]
+    ]
+    for cam in fresh_cams:
+        try:
+            await asyncio.wait_for(_auto_detect_capabilities(cam), timeout=8.0)
+        except asyncio.TimeoutError:
+            logger.warning("Capability detection timed out for %s — using defaults", cam.id)
+        except Exception as e:
+            logger.warning("Capability detection failed for %s: %s", cam.id, e)
 
 
 def _get_client(camera: CameraConfig) -> VapixClient:
@@ -1884,6 +1982,9 @@ async def _dispatch_tool(
 ) -> list[TextContent | ImageContent]:
     """Dispatch a tool call to its handler. Separated for testability."""
 
+    # cameras.yaml is edited by `vapx config …` while this server runs.
+    await _reload_config_if_changed()
+
     # --- Global tools (no camera_id needed) ---
     if name in _GLOBAL_HANDLERS:
         return await _GLOBAL_HANDLERS[name](args)
@@ -2526,6 +2627,8 @@ async def main():
     # Pre-load config to fail fast on startup
     global config
     config = load_config(args.config)
+    global _config_mtime
+    _config_mtime = _mtime_of(config.source)
     logger.info(
         "Loaded %d camera(s): %s",
         len(config.cameras),

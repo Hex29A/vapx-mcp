@@ -103,6 +103,10 @@ class AppConfig(BaseModel):
         default_factory=list,
         description="Human-readable reasons for camera entries that failed validation and were skipped",
     )
+    source: Optional[Path] = Field(
+        default=None,
+        description="File this config was loaded from, so it can be watched for changes",
+    )
 
     def get_camera(self, camera_id: str) -> Optional[CameraConfig]:
         """Look up a camera by its id. Returns None if not found."""
@@ -282,4 +286,4 @@ def _build_app_config(entries: object, source: Path) -> AppConfig:
             "; ".join(skipped),
         )
 
-    return AppConfig(cameras=cameras, skipped=skipped)
+    return AppConfig(cameras=cameras, skipped=skipped, source=Path(source))
