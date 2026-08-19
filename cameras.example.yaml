@@ -3,6 +3,12 @@
 # Copy this file to cameras.yaml and fill in your camera details.
 # Passwords can reference environment variables with ${ENV_VAR} syntax.
 #
+# TWO FORMATS ARE ACCEPTED. This file shows the native one — a list under
+# `cameras:`, one entry per `- id:`. The vapx CLI writes a different shape: a
+# map keyed by camera name, plus an optional `defaults:` block. Both load fine,
+# so if you share cameras.yaml with vapx and find your file rewritten into the
+# other shape, nothing is broken. See the end of this file for that variant.
+#
 # Available capabilities:
 #   snapshot, ptz, io, light, overlay, vmd, guard_tour, siren,
 #   storage, clear_view, privacy_mask, time, daynight,
@@ -38,3 +44,26 @@ cameras:
     password: "${BACKYARD_PASS}"
     capabilities:
       - auto  # Auto-detect capabilities from camera
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The vapx CLI format, for reference. Do not combine both shapes in one file —
+# pick whichever you prefer, or simply let vapx maintain the file for you.
+#
+# defaults:
+#   user: root            # becomes `username` for every camera below
+#   port: 80
+#   https: false
+#   verify_ssl: false
+#   timeout: 10
+#
+# cameras:
+#   front-door:           # the key is the camera id
+#     host: "192.168.1.100"
+#     pass: "${FRONT_DOOR_PASS}"    # `pass`/`user` here, not `password`/`username`
+#   backyard:
+#     host: "192.168.1.101"
+#     pass: "${BACKYARD_PASS}"
+#
+# Values in `defaults:` apply to every camera; a camera may override any of them.
+# Entries that fail validation — no password, an unset ${ENV_VAR}, a host with a
+# protocol prefix — are logged and skipped, and the remaining cameras load normally.
