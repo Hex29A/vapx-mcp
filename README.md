@@ -104,7 +104,8 @@ This project is part of a two-tool ecosystem for Axis cameras. Both tools share 
 - **Tolerant config loading**: a camera entry that fails validation — missing password, an unset `${ENV_VAR}`, a host with a protocol prefix — is logged and skipped rather than aborting startup. The remaining cameras load normally, and the reasons are kept on `AppConfig.skipped`. Only an empty result is fatal. This matters because `cameras.yaml` is shared with the [vapx](https://github.com/Hex29A/vapx) CLI, which writes to it.
 - **Auto-capability detection**: Add `auto` to a camera's capabilities list to auto-discover supported APIs via VAPIX API Discovery. Detected capabilities are merged with manually specified ones.
 - **MCP Resources**: Cameras expose `camera://{id}/snapshot` (live JPEG) and `camera://{id}/info` (device properties) as MCP resources.
-- **Streamable HTTP transport**: Run with `--transport streamable-http` for the latest MCP transport protocol.
+- **Streamable HTTP transport**: Run with `--transport streamable-http` for the latest MCP transport protocol. This is the recommended HTTP transport; `sse` is deprecated by the MCP spec and kept only for existing clients.
+- **Bearer-token auth**: Both HTTP transports require `Authorization: Bearer <token>` (token from `VAPX_MCP_TOKEN`) and answer 401 otherwise. The server refuses to start an HTTP transport without a token unless `--insecure-no-auth` is passed. stdio is unaffected.
 - **Typed dispatch**: Handler-function registry with per-tool capability checking — easy to extend.
 - **GitHub Actions CI**: Automated linting (ruff), Docker test builds, and unit tests on every push/PR.
 
@@ -165,17 +166,36 @@ Add to your MCP client config (e.g. `~/.claude.json`):
 > **`--network=host`** is required so the container can reach cameras on your local LAN.
 > **`-v .../exports:/exports`** is needed if you use `export_recording` — without it, exported files are lost when the container exits. Set `VAPIX_EXPORTS_DIR` env var to change the export path.
 
-### 5. Alternative: SSE/HTTP mode
+### 5. Alternative: HTTP mode
 
-For web-based access or debugging:
+For web-based access or debugging. HTTP transports require a bearer token: anyone who can reach the port could otherwise drive every camera in the config.
 
 ```bash
-# SSE mode
-docker compose up vapx-sse
-# Server available at http://localhost:8080/sse
+# Generate a token and put it in .env (chmod 600), next to the camera credentials
+echo "VAPX_MCP_TOKEN=$(openssl rand -hex 32)" >> .env
 
-# Streamable HTTP mode (latest MCP transport)
+# Streamable HTTP mode (recommended) — endpoint: http://localhost:8080/mcp
 python server.py --transport streamable-http --port 8080
+
+# SSE mode (deprecated by the MCP spec, kept for existing clients)
+# Endpoint: http://localhost:8080/sse
+docker compose up vapx-sse
+```
+
+Requests without `Authorization: Bearer <token>` (or with a wrong token) get `401`. Without `VAPX_MCP_TOKEN` the server exits at startup; `--insecure-no-auth` overrides that and should only be used on a trusted loopback.
+
+Example client config (Streamable HTTP, header-based auth):
+
+```json
+{
+  "mcpServers": {
+    "vapx": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": { "Authorization": "Bearer <your token>" }
+    }
+  }
+}
 ```
 
 ## Project Structure
@@ -323,11 +343,11 @@ pip install -r requirements.txt
 # Run in stdio mode
 python server.py --config cameras.yaml
 
-# Run in SSE mode
-python server.py --transport sse --port 8080
+# Run in Streamable HTTP mode (token required)
+VAPX_MCP_TOKEN=... python server.py --transport streamable-http --port 8080
 
-# Run in Streamable HTTP mode
-python server.py --transport streamable-http --port 8080
+# Run in SSE mode (deprecated)
+VAPX_MCP_TOKEN=... python server.py --transport sse --port 8080
 ```
 
 ## Running Tests
