@@ -9,8 +9,11 @@ Usage:
     # stdio mode (default — for MCP client integration)
     python server.py
 
-    # SSE mode (for Docker / web access)
-    python server.py --transport sse --port 8080
+    # Streamable HTTP mode (for Docker / web access; needs a bearer token)
+    VAPX_MCP_TOKEN=... python server.py --transport streamable-http --port 8080
+
+    # SSE mode (deprecated by the MCP spec, kept for existing clients)
+    VAPX_MCP_TOKEN=... python server.py --transport sse --port 8080
 
 Environment:
     VAPIX_CONFIG: Path to cameras.yaml (default: ./cameras.yaml)
@@ -37,6 +40,7 @@ Tools provided:
 import argparse
 import asyncio
 import base64
+import hmac
 import json
 import logging
 import os
@@ -2599,6 +2603,119 @@ _CAMERA_HANDLERS: dict[str, tuple[str | None, Any]] = {
 
 
 # ---------------------------------------------------------------------------
+# HTTP transports
+# ---------------------------------------------------------------------------
+TOKEN_ENV_VAR = "VAPX_MCP_TOKEN"
+
+
+class BearerAuthMiddleware:
+    """Pure ASGI middleware that requires ``Authorization: Bearer <token>``.
+
+    Written as plain ASGI rather than BaseHTTPMiddleware because the SSE and
+    streamable-HTTP responses are long-lived streams.
+    """
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self._token = token.encode()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        supplied = b""
+        for name, value in scope["headers"]:
+            if name == b"authorization":
+                scheme, _, credentials = value.partition(b" ")
+                if scheme.lower() == b"bearer":
+                    supplied = credentials.strip()
+                break
+
+        if not hmac.compare_digest(supplied, self._token):
+            body = b"Unauthorized"
+            await send({
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"text/plain; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"www-authenticate", b"Bearer"),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
+
+
+def build_sse_app(token: str | None):
+    """Starlette app for the (deprecated) SSE transport."""
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+
+    sse = SseServerTransport("/messages")
+
+    async def handle_sse(request):
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await app.run(
+                streams[0],
+                streams[1],
+                app.create_initialization_options(),
+            )
+
+    starlette_app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages", app=sse.handle_post_message),
+        ],
+    )
+    return BearerAuthMiddleware(starlette_app, token) if token else starlette_app
+
+
+def build_streamable_http_app(token: str | None):
+    """Starlette app for the Streamable HTTP transport.
+
+    Issue #39: StreamableHTTPServerTransport's constructor dropped
+    mcp_endpoint/is_json (now mcp_session_id/is_json_response_enabled,
+    and it's meant to be instantiated per-session, not once for the
+    whole app). The high-level StreamableHTTPSessionManager is the
+    current public API — it owns transport lifecycle per request and
+    exposes a plain ASGI handle_request() to mount directly.
+    """
+    import contextlib
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        json_response=True,
+        stateless=True,
+    )
+
+    async def handle_mcp(scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_starlette_app):
+        async with session_manager.run():
+            yield
+
+    starlette_app = Starlette(
+        routes=[
+            Mount("/mcp", app=handle_mcp),
+        ],
+        lifespan=lifespan,
+    )
+    return BearerAuthMiddleware(starlette_app, token) if token else starlette_app
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 async def main():
@@ -2608,7 +2725,10 @@ async def main():
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
         default="stdio",
-        help="MCP transport mode (default: stdio)",
+        help="MCP transport mode (default: stdio). 'streamable-http' is the "
+        "recommended HTTP transport; 'sse' is deprecated by the MCP spec and "
+        "kept only for existing clients. HTTP transports require a bearer "
+        f"token in ${TOKEN_ENV_VAR}.",
     )
     parser.add_argument(
         "--port",
@@ -2622,7 +2742,24 @@ async def main():
         default=None,
         help="Path to cameras.yaml config file",
     )
+    parser.add_argument(
+        "--insecure-no-auth",
+        action="store_true",
+        help=f"Allow an HTTP transport to start without ${TOKEN_ENV_VAR}. "
+        "Anyone who can reach the port can then control every camera.",
+    )
     args = parser.parse_args()
+
+    # Refuse before loading config or probing cameras: an unauthenticated HTTP
+    # port exposes every camera in the config.
+    token = os.environ.get(TOKEN_ENV_VAR, "").strip() or None
+    if args.transport != "stdio" and token is None:
+        if not args.insecure_no_auth:
+            parser.error(
+                f"--transport {args.transport} requires a bearer token in "
+                f"${TOKEN_ENV_VAR} (or pass --insecure-no-auth to run without auth)"
+            )
+        logger.warning("Running %s without authentication", args.transport)
 
     # Pre-load config to fail fast on startup
     global config
@@ -2663,68 +2800,13 @@ async def main():
                 write_stream,
                 app.create_initialization_options(),
             )
-    elif args.transport == "sse":
+    else:
         import uvicorn
-        from mcp.server.sse import SseServerTransport
-        from starlette.applications import Starlette
-        from starlette.routing import Mount, Route
 
-        sse = SseServerTransport("/messages")
-
-        async def handle_sse(request):
-            async with sse.connect_sse(
-                request.scope, request.receive, request._send
-            ) as streams:
-                await app.run(
-                    streams[0],
-                    streams[1],
-                    app.create_initialization_options(),
-                )
-
-        starlette_app = Starlette(
-            routes=[
-                Route("/sse", endpoint=handle_sse),
-                Mount("/messages", app=sse.handle_post_message),
-            ],
-        )
-        uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
-        server = uvicorn.Server(uv_config)
-        await server.serve()
-
-    elif args.transport == "streamable-http":
-        # Issue #39: StreamableHTTPServerTransport's constructor dropped
-        # mcp_endpoint/is_json (now mcp_session_id/is_json_response_enabled,
-        # and it's meant to be instantiated per-session, not once for the
-        # whole app). The high-level StreamableHTTPSessionManager is the
-        # current public API — it owns transport lifecycle per request and
-        # exposes a plain ASGI handle_request() to mount directly.
-        import contextlib
-
-        import uvicorn
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-        from starlette.applications import Starlette
-        from starlette.routing import Mount
-
-        session_manager = StreamableHTTPSessionManager(
-            app=app,
-            json_response=True,
-            stateless=True,
-        )
-
-        async def handle_mcp(scope, receive, send):
-            await session_manager.handle_request(scope, receive, send)
-
-        @contextlib.asynccontextmanager
-        async def lifespan(_starlette_app):
-            async with session_manager.run():
-                yield
-
-        starlette_app = Starlette(
-            routes=[
-                Mount("/mcp", app=handle_mcp),
-            ],
-            lifespan=lifespan,
-        )
+        if args.transport == "sse":
+            starlette_app = build_sse_app(token)
+        else:
+            starlette_app = build_streamable_http_app(token)
         uv_config = uvicorn.Config(starlette_app, host="0.0.0.0", port=args.port)
         server = uvicorn.Server(uv_config)
         await server.serve()

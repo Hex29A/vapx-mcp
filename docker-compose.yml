@@ -11,7 +11,11 @@
 #     vapx-mcp
 
 services:
-  # SSE/HTTP transport — long-running server accessible via HTTP
+  # SSE/HTTP transport — long-running server accessible via HTTP.
+  # Requires VAPX_MCP_TOKEN in .env; clients send "Authorization: Bearer <token>".
+  # SSE is deprecated by the MCP spec and kept for existing clients; for new
+  # setups change the command to ["--transport", "streamable-http", "--port", "8080"]
+  # (served at /mcp).
   vapx-sse:
     build: .
     image: vapx-mcp

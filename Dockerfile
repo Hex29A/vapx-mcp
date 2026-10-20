@@ -15,9 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config.py server.py ./
 COPY vapix/ ./vapix/
 
-# Default config mount point
-VOLUME ["/app/cameras.yaml"]
-
 # Health check label
 LABEL maintainer="hex29a"
 LABEL description="VPX MCP Server — Axis camera control via MCP"
@@ -32,5 +29,6 @@ CMD ["-v"]
 # --- Production stage ---
 FROM base AS production
 # Default: stdio transport (for MCP clients)
-# Override with --transport sse --port 8080 for HTTP mode
+# Override with --transport streamable-http --port 8080 for HTTP mode
+# (requires VAPX_MCP_TOKEN; the config path is selectable with VAPIX_CONFIG)
 ENTRYPOINT ["python", "server.py"]
