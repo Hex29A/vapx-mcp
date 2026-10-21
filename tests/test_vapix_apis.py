@@ -61,7 +61,7 @@ class TestDeviceAPI:
                     "Brand": "AXIS",
                     "ProdFullName": "AXIS M2036-LE Network Camera",
                     "ProdNbr": "M2036-LE",
-                    "SerialNumber": "ACCC8E123456",
+                    "SerialNumber": "00A1B2C3D4E1",
                     "Version": "11.6.54",
                 }
             },
@@ -76,7 +76,7 @@ class TestDeviceAPI:
 
             assert result["Brand"] == "AXIS"
             assert result["ProdNbr"] == "M2036-LE"
-            assert result["SerialNumber"] == "ACCC8E123456"
+            assert result["SerialNumber"] == "00A1B2C3D4E1"
             assert route.called
 
         await client.close()
