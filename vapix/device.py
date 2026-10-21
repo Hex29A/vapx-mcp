@@ -31,7 +31,7 @@ async def get_all_properties(client: VapixClient) -> dict[str, Any]:
             "Architecture": "armv7hf",
             "Brand": "AXIS",
             "ProdFullName": "AXIS M2036-LE Network Camera",
-            "SerialNumber": "ACCC8E123456",
+            "SerialNumber": "00A1B2C3D4E1",
             "Version": "11.6.54",
             ...
         }
