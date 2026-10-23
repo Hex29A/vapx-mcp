@@ -1,5 +1,8 @@
 # VAPX MCP Server
 
+> [!IMPORTANT]
+> **This project is archived and no longer maintained.** The MCP server is now built into the [vapx](https://github.com/Hex29A/vapx) command-line tool as `vapx mcp` (since v0.29.0). It keeps the same tool names, parameters and `cameras.yaml`, so existing clients keep working. See the [MCP server](https://github.com/Hex29A/vapx#mcp-server) section and [Migrating from the Python vapx-mcp](https://github.com/Hex29A/vapx#migrating-from-the-python-vapx-mcp).
+
 A **Model Context Protocol (MCP)** server that wraps **Axis camera VAPIX APIs**, enabling AI assistants (Claude, etc.) to control and query Axis network cameras directly.
 
 > **Disclaimer**: This project is not affiliated with, endorsed by, or in any way officially connected to [Axis Communications AB](https://www.axis.com/). VAPIX is a registered trademark of Axis Communications AB.
